@@ -75,6 +75,75 @@ penalty2weight = function(x) {
   x / sum(x)
 }
 
+nearest_known_site = function(site, known_sites, thresh) {
+  if (length(known_sites) == 0) {
+    return(list(value = site, known = FALSE))
+  }
+  diff = abs(known_sites - site)
+  idx = which.min(diff)
+  if (diff[idx] <= thresh) {
+    return(list(value = known_sites[idx], known = TRUE))
+  }
+  list(value = site, known = FALSE)
+}
+
+annotate_novel_isoforms = function(transcripts, gene, gtf, thresh = 3,
+                                   gtf_start_col = "start", gtf_end_col = "end",
+                                   sep = ",", split = "|") {
+  transcripts_uniq = sort(unique(as.character(transcripts)))
+  if (length(transcripts_uniq) == 0) {
+    return(NULL)
+  }
+
+  known_starts = if (nrow(gtf) > 0) sort(unique(as.numeric(gtf[[gtf_start_col]]))) else numeric()
+  known_ends = if (nrow(gtf) > 0) sort(unique(as.numeric(gtf[[gtf_end_col]]))) else numeric()
+  known_exons = if (nrow(gtf) > 0) {
+    unique(paste(gtf[[gtf_start_col]], gtf[[gtf_end_col]], sep = sep))
+  } else {
+    character()
+  }
+
+  annotation = lapply(transcripts_uniq, function(tx) {
+    bins = read2bins(tx, sep = sep, split = split)
+    canon_bins = lapply(seq_len(nrow(bins)), function(i) {
+      start_match = nearest_known_site(as.numeric(bins$start[i]), known_starts, thresh)
+      end_match = nearest_known_site(as.numeric(bins$end[i]), known_ends, thresh)
+      exon_key = paste(start_match$value, end_match$value, sep = sep)
+      exon_known = start_match$known && end_match$known && exon_key %in% known_exons
+      data.frame(
+        start = start_match$value,
+        end = end_match$value,
+        exon_known = exon_known,
+        stringsAsFactors = FALSE
+      )
+    })
+    canon_bins = do.call(rbind, canon_bins)
+    class = if (all(canon_bins$exon_known)) "nic" else "nnic"
+    signature = paste(paste(canon_bins$start, canon_bins$end, sep = sep), collapse = split)
+    data.frame(
+      isoform = tx,
+      novel_class = class,
+      novel_signature = signature,
+      stringsAsFactors = FALSE
+    )
+  })
+  annotation = do.call(rbind, annotation)
+
+  novel_groups = unique(annotation[, c("novel_signature", "novel_class")])
+  novel_groups = novel_groups[order(novel_groups$novel_signature, novel_groups$novel_class), , drop = FALSE]
+  novel_groups$transname = sprintf(
+    "%s.novel%d.%s",
+    gene,
+    seq_len(nrow(novel_groups)),
+    novel_groups$novel_class
+  )
+
+  annotation = merge(annotation, novel_groups, by = c("novel_signature", "novel_class"), sort = FALSE)
+  annotation = annotation[match(transcripts_uniq, annotation$isoform), c("isoform", "transname", "novel_class", "novel_signature")]
+  rownames(annotation) = NULL
+  annotation
+}
+
 iso_corres = function(transcripts, gene, gtf, thresh = 3, overlap_thresh = 0,
                       end_bias = 200, gtf_gene_col = "gene", gtf_iso_col = "transname",
                       gtf_start_col = "start", gtf_end_col = "end",
@@ -152,7 +221,7 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
       dplyr::filter(.data[[gtf_gene_col]] == i) %>%
       dplyr::arrange(.data[[gtf_iso_col]], .data[[gtf_start_col]], .data[[gtf_end_col]])
 
-    if (filter_only_intron) {
+    if (filter_only_intron && nrow(sub_gtf) > 0) {
       transcripts_uniq = unique(sub_data[, transcript_col])
       intron_flag = intron_only(transcripts_uniq, sub_gtf, gtf_start_col, gtf_end_col, sep, split)
       transcripts_uniq = transcripts_uniq[!intron_flag]
@@ -162,19 +231,22 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
       sub_data = sub_data %>% dplyr::filter(.data[[transcript_col]] %in% transcripts_uniq)
     }
 
-    iso_index = iso_corres(
-      sub_data[, transcript_col], gene = i, gtf = sub_gtf, thresh = thresh,
-      overlap_thresh = overlap_thresh, gtf_gene_col = gtf_gene_col,
-      gtf_iso_col = gtf_iso_col, gtf_start_col = gtf_start_col,
-      gtf_end_col = gtf_end_col, sep = sep, split = split
-    )
-    if (is.null(iso_index)) {
-      sub_data$transname = "unknown"
-      sub_out = sub_data %>%
-        dplyr::group_by(cell, transname) %>%
-        dplyr::summarise(count = sum(count), .groups = "drop")
-      colnames(sub_out) = c("cell", "isoform", "count")
-    } else {
+    iso_index = NULL
+    if (nrow(sub_gtf) > 0) {
+      iso_index = iso_corres(
+        sub_data[, transcript_col], gene = i, gtf = sub_gtf, thresh = thresh,
+        overlap_thresh = overlap_thresh, gtf_gene_col = gtf_gene_col,
+        gtf_iso_col = gtf_iso_col, gtf_start_col = gtf_start_col,
+        gtf_end_col = gtf_end_col, sep = sep, split = split
+      )
+    }
+
+    matched_isoforms = if (is.null(iso_index)) character() else unique(as.character(iso_index$isoform))
+    known_sub_data = sub_data %>% dplyr::filter(.data[[transcript_col]] %in% matched_isoforms)
+    novel_sub_data = sub_data %>% dplyr::filter(!(.data[[transcript_col]] %in% matched_isoforms))
+
+    known_out = NULL
+    if (!is.null(iso_index) && nrow(known_sub_data) > 0) {
       iso_index_weight = tidyr::pivot_wider(
         iso_index[, c("isoform", "weight", "transname")],
         names_from = "transname",
@@ -182,18 +254,45 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
       )
       iso_index_weight[is.na(iso_index_weight)] = 0
 
-      sub_out = cbind(
-        sub_data$cell,
-        iso_index_weight[match(sub_data$isoform, iso_index_weight$isoform), 2:ncol(iso_index_weight)] * sub_data$count
+      known_out = cbind(
+        known_sub_data$cell,
+        iso_index_weight[match(known_sub_data$isoform, iso_index_weight$isoform), 2:ncol(iso_index_weight)] * known_sub_data$count
       )
-      colnames(sub_out)[1] = "cell"
-      sub_out = tidyr::pivot_longer(
-        sub_out,
-        cols = setdiff(colnames(sub_out), "cell"),
+      colnames(known_out)[1] = "cell"
+      known_out = tidyr::pivot_longer(
+        known_out,
+        cols = setdiff(colnames(known_out), "cell"),
         names_to = "isoform",
         values_to = "count"
       )
-      sub_out = sub_out %>% dplyr::filter(count > 0)
+      known_out = known_out %>% dplyr::filter(count > 0)
+    }
+
+    novel_out = NULL
+    if (nrow(novel_sub_data) > 0) {
+      novel_index = annotate_novel_isoforms(
+        novel_sub_data[, transcript_col],
+        gene = i,
+        gtf = sub_gtf,
+        thresh = thresh,
+        gtf_start_col = gtf_start_col,
+        gtf_end_col = gtf_end_col,
+        sep = sep,
+        split = split
+      )
+      novel_out = dplyr::left_join(
+        novel_sub_data[, c(cell_col, transcript_col, count_col)],
+        novel_index,
+        by = setNames("isoform", transcript_col)
+      ) %>%
+        dplyr::group_by(.data[[cell_col]], transname) %>%
+        dplyr::summarise(count = sum(.data[[count_col]]), .groups = "drop")
+      colnames(novel_out) = c("cell", "isoform", "count")
+    }
+
+    sub_out = dplyr::bind_rows(known_out, novel_out)
+    if (is.null(sub_out) || nrow(sub_out) == 0) {
+      return(NULL)
     }
     sub_out$gene = i
     sub_out
