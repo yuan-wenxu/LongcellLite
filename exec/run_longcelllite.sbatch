@@ -19,10 +19,6 @@ EOF
     exit 1
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LONGCELLLITE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-CONFIG_PATH=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --config)
@@ -52,12 +48,8 @@ R_SCRIPT_BIN="${R_SCRIPT_BIN:-Rscript}"
 R_INSTALL_BIN="${R_INSTALL_BIN:-R}"
 INSTALL_LOCAL_PACKAGE="${INSTALL_LOCAL_PACKAGE:-FALSE}"
 LONGCELLLITE_DIR="${LONGCELLLITE_DIR:-${LONGCELLLITE_DIR}}"
-RUN_LOG_DIR="${RUN_LOG_DIR:-${WORK_DIR}/logs}"
 
-mkdir -p "${WORK_DIR}" "${RUN_LOG_DIR}"
-timestamp="$(date '+%Y%m%d_%H%M%S')"
-LOG_FILE="${RUN_LOG_DIR}/longcelllite.${timestamp}.log"
-exec > >(tee -a "${LOG_FILE}") 2>&1
+mkdir -p "${WORK_DIR}"
 
 require_file() {
     local label="$1"
@@ -96,7 +88,6 @@ echo "to_isoform:          ${TO_ISOFORM}"
 echo "overwrite:           ${OVERWRITE}"
 echo "filter_only_intron:  ${FILTER_ONLY_INTRON}"
 echo "Install local pkg:   ${INSTALL_LOCAL_PACKAGE}"
-echo "Log file:            ${LOG_FILE}"
 
 require_file "LongcellLite entry script" "${LONGCELLLITE_DIR}/exec/RunLongcellLite.R"
 require_file "Input BAM" "${INPUT_BAM}"
