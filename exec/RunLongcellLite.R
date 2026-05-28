@@ -23,7 +23,7 @@ p$add_argument("--overwrite", action = "store_true", help = "Overwrite cached ou
 p$add_argument("--to_isoform", action = "store_true", help = "Generate gene/isoform matrices from GTF mapping")
 p$add_argument("--splice_site_thresh", default = 3, type = "integer", help = "Threshold for splice site assignment")
 p$add_argument("--mid_offset_thresh", default = 5, type = "integer", help = "Threshold for mid offset assignment")
-p$add_argument("--overlap_thresh", default = 0.5, type = "double", help = "Threshold for overlap assignment")
+p$add_argument("--overlap_thresh", default = 0, type = "double", help = "Threshold for overlap assignment")
 p$add_argument("--filter_only_intron", action = "store_true", help = "Filter only intron reads")
 
 args = p$parse_args()

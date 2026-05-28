@@ -75,7 +75,7 @@ penalty2weight = function(x) {
   x / sum(x)
 }
 
-iso_corres = function(transcripts, gene, gtf, thresh = 3, overlap_thresh = 0.25,
+iso_corres = function(transcripts, gene, gtf, thresh = 3, overlap_thresh = 0,
                       end_bias = 200, gtf_gene_col = "gene", gtf_iso_col = "transname",
                       gtf_start_col = "start", gtf_end_col = "end",
                       sep = ",", split = "|") {
@@ -137,7 +137,7 @@ iso_corres = function(transcripts, gene, gtf, thresh = 3, overlap_thresh = 0.25,
   transcripts_iso_corres %>% dplyr::group_by(isoform) %>% dplyr::mutate(weight = penalty2weight(penalty))
 }
 
-cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0.25,
+cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
                                   filter_only_intron = TRUE, cell_col = "cell", gene_col = "gene",
                                   transcript_col = "isoform", count_col = "count",
                                   gtf_gene_col = "gene", gtf_iso_col = "transname",
