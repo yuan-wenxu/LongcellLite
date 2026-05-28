@@ -1,0 +1,40 @@
+Package: LongcellLite
+Type: Package
+Title: Lightweight BAM-Based Single-Cell Long-Read Quantification
+Version: 0.1.0
+Author: Wenxu Yuan
+Maintainer: Wenxu Yuan <yuanwenxu123@gmail.com>
+Description: A lightweight single-cell long-read RNA-seq quantification package
+    that starts from mapped BAM files with pre-assigned cell barcodes and UMIs.
+    The first version focuses on annotation preparation, BAM read extraction,
+    read-level isoform reconstruction, UMI-level isoform quantification, and
+    optional transcript-matrix generation while reusing Longcellsrc for core
+    low-level computations.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Imports:
+    argparse,
+    BSgenome,
+    BiocManager,
+    Biostrings,
+    data.table,
+    dbscan,
+    dplyr,
+    GenomicFeatures,
+    GenomeInfoDb,
+    GenomicRanges,
+    igraph,
+    IRanges,
+    Longcellsrc,
+    magrittr,
+    Matrix,
+    parallel,
+    R.utils,
+    Rsamtools,
+    rlang,
+    S4Vectors,
+    stringr,
+    tidyr,
+    txdbmaker,
+    valr
