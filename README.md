@@ -9,12 +9,14 @@ LongcellLite starts from a mapped BAM file with pre-assigned cell barcodes and U
 Current scope:
 
 - build gene-level annotation from `GTF` or use an existing gene BED
-- read a mapped BAM file
+- read and index a mapped BAM file in place
 - reconstruct read-level isoform structures
 - extract `CB` and `UB` from read names
 - perform UMI clustering and isoform correction
 - output a structure-based isoform count table
-- optionally map structure-based isoforms to annotated transcripts and export 10X-style matrices
+- optionally map structure-based isoforms to annotated transcripts
+- annotate unmatched isoforms as gene-level novel isoforms
+- export 10X-style gene and isoform matrices
 
 ## Input
 
@@ -42,7 +44,7 @@ The current first-version workflow is:
 2. Initialize the output directory structure
 3. Build or load annotation
 4. Load the reference genome
-5. Prepare and index the input BAM
+5. Use the input BAM in place and create an index if needed
 6. Filter genes without BAM coverage
 7. Extract read-level isoform structures from the BAM
 8. Extract barcode and UMI from read names
@@ -50,7 +52,9 @@ The current first-version workflow is:
 10. Perform UMI clustering and isoform correction
 11. Write `out/iso_count.tsv`
 12. Optionally map structure-based isoforms to annotated transcripts
-13. Optionally write `out/gene/` and `out/isoform/` 10X-style matrices
+13. For unmatched isoforms within a known gene, assign novel transcript labels
+14. Classify novel transcripts as `nic` or `nnic`
+15. Write 10X-style `out/gene/` and `out/isoform/` matrices
 
 ## Installation
 
@@ -108,13 +112,18 @@ pixi run -e long Rscript exec/RunLongcellLite.R \
   --to_isoform
 ```
 
+SLURM submission is also supported:
+
+```bash
+sbatch exec/run_longcelllite.sbatch --config exec/config.sh
+```
+
 ## Output
 
 Main outputs:
 
 - `annotation/gene_bed.rds`
 - `annotation/exon_gtf.rds`
-- `bam/polish.bam`
 - `read_isoform/read_isoform.tsv`
 - `out/iso_count.tsv`
 
@@ -123,10 +132,22 @@ Optional outputs when `--to_isoform` is enabled:
 - `out/gene/`
 - `out/isoform/`
 
+When transcript annotation is enabled, `out/isoform/` may contain:
+
+- known transcript IDs from the input annotation
+- novel isoforms labeled as `GeneName.novelX.nic`
+- novel isoforms labeled as `GeneName.novelX.nnic`
+
+Current novel transcript rules:
+
+- `nic`: all exon boundaries can be explained by known exons, but the exon combination is novel
+- `nnic`: the isoform contains at least one exon boundary that cannot be explained by the known exon catalog
+
 ## Notes
 
 - LongcellLite does not perform adapter detection or barcode extraction from raw FASTQ.
 - LongcellLite does not run `minimap2`; it assumes the BAM already exists.
+- LongcellLite uses the input BAM in place and does not create a duplicated working-copy BAM.
 - The current implementation focuses on the BAM-to-quantification part of the workflow.
 
 ## References
