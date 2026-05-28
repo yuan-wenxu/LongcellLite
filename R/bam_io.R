@@ -48,30 +48,15 @@ prepare_input_bam = function(input_bam_path, work_dir, samtools = "samtools", fo
     stop(sprintf("Input BAM does not exist: %s", input_bam_path))
   }
 
-  out_bam = file.path(work_dir, "bam", "polish.bam")
-  out_bai = paste0(out_bam, ".bai")
+  input_bam_path = normalizePath(input_bam_path)
   input_bai_candidates = c(paste0(input_bam_path, ".bai"), sub("\\.bam$", ".bai", input_bam_path))
+  has_index = any(file.exists(input_bai_candidates))
 
-  if (file.exists(out_bam) && !force) {
-    if (!file.exists(out_bai)) {
-      system(paste(c(samtools, "index", out_bam), collapse = " "))
-    }
-    return(out_bam)
+  if (!has_index || force) {
+    system(paste(c(samtools, "index", input_bam_path), collapse = " "))
   }
 
-  file.copy(input_bam_path, out_bam, overwrite = TRUE)
-  copied_bai = FALSE
-  for (candidate in input_bai_candidates) {
-    if (file.exists(candidate)) {
-      file.copy(candidate, out_bai, overwrite = TRUE)
-      copied_bai = TRUE
-      break
-    }
-  }
-  if (!copied_bai) {
-    system(paste(c(samtools, "index", out_bam), collapse = " "))
-  }
-  out_bam
+  input_bam_path
 }
 
 readBam = function(bamFile, chr, start, end, strand, map_qual = 30) {

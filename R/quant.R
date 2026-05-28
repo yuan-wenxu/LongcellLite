@@ -1,4 +1,4 @@
-isoform_correct_filter <- function(gene_cells_cluster, filter_ratio, strand, split = "|", sep = ",") {
+isoform_correct_filter <- function(gene_cells_cluster, filter_ratio = 0, strand, split = "|", sep = ",") {
   gene_isoform = splice_site_table(
     gene_cells_cluster$isoform,
     split, sep,
@@ -27,10 +27,11 @@ isoform_correct_filter <- function(gene_cells_cluster, filter_ratio, strand, spl
   as.data.frame(cells_isoforms_size_filter(gene_isoform, ratio = filter_ratio))
 }
 
-gene_umi_count <- function(cell_exon, qual, strand, bar = "barcode",
+gene_umi_count <- function(cell_exon, strand, bar = "barcode",
                            isoform = "isoform", polyA = "polyA",
                            sim_thresh = NULL, split = "|", sep = ",",
-                           splice_site_thresh = 3, verbose = FALSE) {
+                           splice_site_thresh = 3, verbose = FALSE,
+                           filter_ratio = 0) {
   colnames(cell_exon)[which(colnames(cell_exon) == bar)] = "cell"
   colnames(cell_exon)[which(colnames(cell_exon) == isoform)] = "isoform"
   colnames(cell_exon)[which(colnames(cell_exon) == polyA)] = "polyA"
@@ -67,17 +68,14 @@ gene_umi_count <- function(cell_exon, qual, strand, bar = "barcode",
   })
 
   gene_cells_cluster = as.data.frame(do.call(rbind, gene_cells_cluster))
-  filter_ratio = mean(c(
-    sum(qual[qual$needle < sim_thresh, "count"]),
-    sum(qual[qual$needle < sim_thresh + 1, "count"])
-  )) / sum(qual$count)
 
   isoform_correct_filter(gene_cells_cluster, filter_ratio, strand, split = split, sep = sep)
 }
 
-umi_count <- function(cell_exon, qual, gene_strand, bar = "barcode", gene = "gene",
+umi_count <- function(cell_exon, gene_strand, bar = "barcode", gene = "gene",
                       isoform = "isoform", polyA = "polyA", sim_thresh = NULL,
-                      split = "|", sep = ",", splice_site_thresh = 3, verbose = FALSE) {
+                      split = "|", sep = ",", splice_site_thresh = 3, verbose = FALSE,
+                      filter_ratio = 0) {
   genes <- unique(as.character(cell_exon[[gene]]))
   genes_umi_count <- lapply(genes, function(i) {
     if (verbose) {
@@ -93,10 +91,11 @@ umi_count <- function(cell_exon, qual, gene_strand, bar = "barcode", gene = "gen
     }
     tryCatch({
       sub_umi_count = gene_umi_count(
-        sub_cell_exon, qual = qual, strand = strand,
+        sub_cell_exon, strand = strand,
         bar = bar, isoform = isoform, polyA = polyA,
         sim_thresh = sim_thresh, split = split, sep = sep,
-        splice_site_thresh = splice_site_thresh, verbose = verbose
+        splice_site_thresh = splice_site_thresh, verbose = verbose,
+        filter_ratio = filter_ratio
       )
       if (is.null(sub_umi_count) || nrow(sub_umi_count) == 0) {
         return(NULL)
@@ -112,18 +111,15 @@ umi_count <- function(cell_exon, qual, gene_strand, bar = "barcode", gene = "gen
   do.call(rbind, genes_umi_count)
 }
 
-umi_count_parallel <- function(data, qual = NULL, dir, gene_bed,
+umi_count_parallel <- function(data, dir, gene_bed,
                                bar = "barcode", gene = "gene",
                                isoform = "isoform", polyA = "polyA",
                                sim_thresh = NULL, split = "|", sep = ",",
                                splice_site_thresh = 3, verbose = FALSE,
                                bed_gene_col = "gene", bed_strand_col = "strand",
-                               cores = 1, force_UMI_dedup = FALSE) {
+                               cores = 1, force_UMI_dedup = FALSE,
+                               filter_ratio = 0) {
   cat("Start to do UMI deduplication:\n")
-
-  if (is.null(qual)) {
-    qual = data.frame(needle = 999L, count = nrow(data))
-  }
 
   out_path = file.path(dir, "iso_count.tsv")
   if (file.exists(out_path) && !force_UMI_dedup) {
@@ -137,10 +133,11 @@ umi_count_parallel <- function(data, qual = NULL, dir, gene_bed,
 
   count_fun = function(x) {
     sub_count = umi_count(
-      x, qual, gene_strand,
+      x, gene_strand,
       bar = bar, gene = gene, isoform = isoform, polyA = polyA,
       sim_thresh = sim_thresh, split = split, sep = sep,
-      splice_site_thresh = splice_site_thresh, verbose = verbose
+      splice_site_thresh = splice_site_thresh, verbose = verbose,
+      filter_ratio = filter_ratio
     )
     if (length(sub_count) == 0 || nrow(sub_count) == 0) {
       return(NULL)
@@ -181,6 +178,13 @@ run_longcelllite <- function(bam_path,
                              mid_offset_thresh = 3,
                              overlap_thresh = 0,
                              filter_only_intron = TRUE) {
+  init_project(work_dir)
+  annot = annotation(gtf_path = gtf_path, gene_bed_path = gene_bed_path, work_dir = work_dir, overwrite = overwrite)
+  gene_bed = annot[[1]]
+  gtf = annot[[2]]
+  genome = load_genome(genome_name = genome_name, genome_path = genome_path)
+  prepared_bam_path = prepare_input_bam(bam_path, work_dir = work_dir, samtools = samtools, force = overwrite)
+
   reads_bc = extract_read_isoforms_from_bam(
     bam_path = bam_path,
     gtf_path = gtf_path,
@@ -197,17 +201,15 @@ run_longcelllite <- function(bam_path,
     bedtools = bedtools,
     samtools = samtools,
     cores = cores,
-    overwrite = overwrite
+    overwrite = overwrite,
+    gene_bed = gene_bed,
+    genome = genome,
+    prepared_bam_path = prepared_bam_path,
+    init_work_dir = FALSE
   )
 
-  annot = annotation(gtf_path = gtf_path, gene_bed_path = gene_bed_path, work_dir = work_dir, overwrite = FALSE)
-  gene_bed = annot[[1]]
-  gtf = annot[[2]]
-
-  qual = data.frame(needle = 999L, count = nrow(reads_bc))
   iso_count = umi_count_parallel(
     data = reads_bc,
-    qual = qual,
     dir = file.path(work_dir, "out"),
     gene_bed = gene_bed,
     cores = cores,

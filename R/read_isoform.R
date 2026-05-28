@@ -124,13 +124,25 @@ extract_read_isoforms_from_bam = function(
   bedtools = "bedtools",
   samtools = "samtools",
   cores = 1,
-  overwrite = FALSE
+  overwrite = FALSE,
+  gene_bed = NULL,
+  genome = NULL,
+  prepared_bam_path = NULL,
+  init_work_dir = TRUE
 ) {
-  init_project(work_dir)
-  annot = annotation(gtf_path = gtf_path, gene_bed_path = gene_bed_path, work_dir = work_dir, overwrite = overwrite)
-  gene_bed = annot[[1]]
-  genome = load_genome(genome_name = genome_name, genome_path = genome_path)
-  local_bam = prepare_input_bam(bam_path, work_dir = work_dir, samtools = samtools, force = overwrite)
+  if (init_work_dir) {
+    init_project(work_dir)
+  }
+  if (is.null(gene_bed)) {
+    annot = annotation(gtf_path = gtf_path, gene_bed_path = gene_bed_path, work_dir = work_dir, overwrite = overwrite)
+    gene_bed = annot[[1]]
+  }
+  if (is.null(genome)) {
+    genome = load_genome(genome_name = genome_name, genome_path = genome_path)
+  }
+  if (is.null(prepared_bam_path)) {
+    prepared_bam_path = prepare_input_bam(bam_path, work_dir = work_dir, samtools = samtools, force = overwrite)
+  }
 
   gene_range = gene_bed %>% dplyr::group_by(gene) %>%
     dplyr::summarise(chr = unique(chr), start = min(start), end = max(end), strand = unique(strand), .groups = "drop")
@@ -143,7 +155,7 @@ extract_read_isoforms_from_bam = function(
     col.names = FALSE
   )
   noncover = bamGeneCoverage(
-    bam = local_bam,
+    bam = prepared_bam_path,
     gene_range_bed = file.path(work_dir, "annotation", "gene_range.txt"),
     outdir = file.path(work_dir, "annotation"),
     bedtools = bedtools
@@ -153,7 +165,7 @@ extract_read_isoforms_from_bam = function(
   }
 
   reads = reads_extraction(
-    bam_path = local_bam,
+    bam_path = prepared_bam_path,
     gene_bed = gene_bed,
     genome = genome,
     toolkit = toolkit,
