@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+START_EPOCH="$(date +%s)"
+START_TS="$(date '+%F %T')"
+
 usage() {
     cat <<'EOF' >&2
 Usage:
@@ -48,8 +51,31 @@ R_SCRIPT_BIN="${R_SCRIPT_BIN:-Rscript}"
 R_INSTALL_BIN="${R_INSTALL_BIN:-R}"
 INSTALL_LOCAL_PACKAGE="${INSTALL_LOCAL_PACKAGE:-FALSE}"
 LONGCELLLITE_DIR="${LONGCELLLITE_DIR:-${LONGCELLLITE_DIR}}"
+RUN_LOG_DIR="${RUN_LOG_DIR:-${WORK_DIR}/logs}"
 
 mkdir -p "${WORK_DIR}"
+mkdir -p "${RUN_LOG_DIR}"
+LOG_FILE="${RUN_LOG_DIR}/longcelllite_$(date '+%Y%m%d_%H%M%S').log"
+exec >> "${LOG_FILE}" 2>&1
+
+finish_job() {
+    local exit_code="$1"
+    local end_epoch end_ts elapsed_h elapsed_m elapsed_s
+    end_epoch="$(date +%s)"
+    end_ts="$(date '+%F %T')"
+    elapsed_h=$(( (end_epoch - START_EPOCH) / 3600 ))
+    elapsed_m=$(( ((end_epoch - START_EPOCH) % 3600) / 60 ))
+    elapsed_s=$(( (end_epoch - START_EPOCH) % 60 ))
+
+    if [[ "${exit_code}" -eq 0 ]]; then
+        echo "[${end_ts}] LongcellLite job finished successfully"
+    else
+        echo "[${end_ts}] LongcellLite job failed with exit code ${exit_code}"
+    fi
+    echo "[${end_ts}] Runtime: ${elapsed_h}h ${elapsed_m}m ${elapsed_s}s"
+}
+
+trap 'finish_job $?' EXIT
 
 require_file() {
     local label="$1"
@@ -71,7 +97,7 @@ bool_is_true() {
     [[ "${1^^}" == "TRUE" ]]
 }
 
-echo "[$(date '+%F %T')] LongcellLite job starting"
+echo "[${START_TS}] LongcellLite job starting"
 echo "Config:              ${CONFIG_PATH}"
 echo "Repo:                ${LONGCELLLITE_DIR}"
 echo "Pixi project:        ${PIXI_PROJECT_DIR}"
@@ -157,5 +183,3 @@ printf ' %q' pixi run -e "${PIXI_ENV}" "${R_SCRIPT_BIN}" "${cmd[@]}"
 printf '\n'
 
 run_in_env "${R_SCRIPT_BIN}" "${cmd[@]}"
-
-echo "[$(date '+%F %T')] LongcellLite job finished"
