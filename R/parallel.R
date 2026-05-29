@@ -25,7 +25,7 @@ genes_distribute = function(data, cores, gene_col = "gene") {
 
   unit = c(seq_len(cores), cores:1)
   gene_read_num = gene_read_num %>%
-    mutate(group = rep(unit, (nrow(data) %/% length(unit) + 1))[seq_len(nrow(gene_read_num))])
+    mutate(group = rep(unit, (nrow(gene_read_num) %/% length(unit) + 1))[seq_len(nrow(gene_read_num))])
 
   gene_list = (gene_read_num %>% group_by(group) %>% summarise(gene = list(gene)))$gene
   lapply(gene_list, function(x) data[data[, gene_col] %in% x, ])

@@ -3,11 +3,13 @@ load_genome = function(genome_name = NULL, genome_path = NULL) {
     if (!file.exists(genome_path)) {
       stop(sprintf("Genome FASTA does not exist: %s", genome_path))
     }
+    cat ("Loading genome from FASTA file: ", genome_path, "\n")
     genome = Biostrings::readDNAStringSet(genome_path)
     names(genome) = sub(" .*", "", names(genome))
     return(genome)
   }
 
+  cat ("Loading genome from BSgenome package: ", genome_name, "\n")
   genome_list = BSgenome::available.genomes()
   if (genome_name %in% genome_list) {
     genome_package = genome_name

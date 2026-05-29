@@ -157,6 +157,7 @@ extract_read_isoforms_from_bam = function(
     )
   }
 
+  cat ("Extracting read-level isoform information...\n")
   gene_range = gene_bed %>% dplyr::group_by(gene) %>%
     dplyr::summarise(chr = unique(chr), start = min(start), end = max(end), strand = unique(strand), .groups = "drop")
   write.table(
@@ -197,6 +198,7 @@ extract_read_isoforms_from_bam = function(
     dplyr::mutate(polyA = polyA.x & polyA.y) %>%
     dplyr::select(-polyA.x, -polyA.y)
 
+  cat ("Saving read-level isoform information to: ", out_path, "\n")
   saveResult(reads_bc, out_path)
   reads_bc
 }
