@@ -90,7 +90,6 @@ saveIsoMat = function(iso, path, cell_col = "cell", gene_col = "gene",
 init_project = function(work_dir) {
   dir.create(work_dir, showWarnings = FALSE, recursive = TRUE)
   dir.create(file.path(work_dir, "annotation"), showWarnings = FALSE)
-  dir.create(file.path(work_dir, "bam"), showWarnings = FALSE)
   dir.create(file.path(work_dir, "read_isoform"), showWarnings = FALSE)
   dir.create(file.path(work_dir, "out"), showWarnings = FALSE)
   normalizePath(work_dir)
