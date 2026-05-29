@@ -109,52 +109,109 @@ mid_coexist_fast <- function(data) {
   len <- mid_len(total)
   parent <- mid_group(total)
 
-  DT <- data.table::as.data.table(data)
-  LEN <- data.table::as.data.table(len)
-  data.table::setnames(LEN, c("mid", "size"))
-  P <- data.table::as.data.table(parent)
-  data.table::setnames(P, c("c", "p"))
-  if (nrow(P)) {
-    data.table::setkey(P, c, p)
-  }
+  DT <- as.data.frame(data, stringsAsFactors = FALSE)
+  LEN <- as.data.frame(len, stringsAsFactors = FALSE)
+  colnames(LEN) <- c("mid", "size")
+  P <- as.data.frame(parent, stringsAsFactors = FALSE)
+  colnames(P) <- c("c", "p")
 
-  CNT <- DT[, .N, by = .(cell, cluster, mid)]
-  CNT <- LEN[CNT, on = "mid"]
-  CNT[is.na(size), size := -Inf]
-  data.table::setorder(CNT, cell, cluster, -N, -size)
+  CNT <- as.data.frame(table(DT$cell, DT$cluster, DT$mid), stringsAsFactors = FALSE)
+  colnames(CNT) <- c("cell", "cluster", "mid", "N")
+  CNT <- CNT[CNT$N > 0, , drop = FALSE]
+  CNT$N <- as.numeric(CNT$N)
+  CNT <- merge(CNT, LEN, by = "mid", all.x = TRUE, sort = FALSE)
+  CNT$size[is.na(CNT$size)] <- -Inf
+  CNT <- CNT[order(CNT$cell, CNT$cluster, -CNT$N, -CNT$size), , drop = FALSE]
 
-  TOP2 <- CNT[, head(.SD, 2L), by = .(cell, cluster)]
-  NG <- TOP2[, .N, by = .(cell, cluster)]
-  groups1 <- TOP2[NG[N == 1L], on = .(cell, cluster)]
-  groups2 <- TOP2[NG[N == 2L], on = .(cell, cluster)]
+  cnt_groups <- split(CNT, interaction(CNT$cell, CNT$cluster, drop = TRUE, lex.order = TRUE))
+  TOP2 <- do.call(rbind, lapply(cnt_groups, function(x) head(x, 2L)))
+  rownames(TOP2) <- NULL
 
-  res_one <- groups1[, .(from = mid, to = mid, count = N)]
-  cons_one <- groups1[, .(cell, cluster, concensus = mid)]
+  ng_df <- do.call(rbind, lapply(split(TOP2, interaction(TOP2$cell, TOP2$cluster, drop = TRUE, lex.order = TRUE)), function(x) {
+    data.frame(cell = x$cell[1], cluster = x$cluster[1], N = nrow(x), stringsAsFactors = FALSE)
+  }))
 
-  groups2[, other_mid := mid[.N:1L], by = .(cell, cluster)]
-  if (nrow(P)) {
-    groups2[, is_child_of_other := P[.SD, on = .(c = mid, p = other_mid), .N, by = .EACHI]$N > 0]
+  key_one <- interaction(ng_df$cell[ng_df$N == 1L], ng_df$cluster[ng_df$N == 1L], drop = TRUE, lex.order = TRUE)
+  key_two <- interaction(ng_df$cell[ng_df$N == 2L], ng_df$cluster[ng_df$N == 2L], drop = TRUE, lex.order = TRUE)
+  top2_key <- interaction(TOP2$cell, TOP2$cluster, drop = TRUE, lex.order = TRUE)
+  groups1 <- TOP2[top2_key %in% key_one, , drop = FALSE]
+  groups2 <- TOP2[top2_key %in% key_two, , drop = FALSE]
+
+  res_one <- if (nrow(groups1) > 0) {
+    data.frame(from = groups1$mid, to = groups1$mid, count = groups1$N, stringsAsFactors = FALSE)
   } else {
-    groups2[, is_child_of_other := FALSE]
+    NULL
+  }
+  cons_one <- if (nrow(groups1) > 0) {
+    data.frame(cell = groups1$cell, cluster = groups1$cluster, concensus = groups1$mid, stringsAsFactors = FALSE)
+  } else {
+    NULL
   }
 
-  CONS2 <- groups2[, {
-    hd <- sum(is_child_of_other) == 1L
-    mm <- if (hd) other_mid[is_child_of_other][1L] else mid[1L]
-    sc <- sum(N)
-    .(has_dir = hd, mode_mid = mm, sum_count = sc)
-  }, by = .(cell, cluster)]
+  if (nrow(groups2) > 0) {
+    groups2_split <- split(groups2, interaction(groups2$cell, groups2$cluster, drop = TRUE, lex.order = TRUE))
+    groups2 <- do.call(rbind, lapply(groups2_split, function(x) {
+      x$other_mid <- rev(x$mid)
+      if (nrow(P) > 0) {
+        x$is_child_of_other <- mapply(function(m, om) any(P$c == m & P$p == om), x$mid, x$other_mid)
+      } else {
+        x$is_child_of_other <- FALSE
+      }
+      x
+    }))
+    rownames(groups2) <- NULL
 
-  res_two_collapse <- CONS2[has_dir == TRUE, .(from = mode_mid, to = mode_mid, count = sum_count)]
-  res_two_map <- groups2[CONS2[has_dir == FALSE], on = .(cell, cluster)][, .(from = mid, to = mode_mid, count = N)]
+    CONS2 <- do.call(rbind, lapply(split(groups2, interaction(groups2$cell, groups2$cluster, drop = TRUE, lex.order = TRUE)), function(x) {
+      hd <- sum(x$is_child_of_other) == 1L
+      mm <- if (hd) x$other_mid[x$is_child_of_other][1L] else x$mid[1L]
+      data.frame(
+        cell = x$cell[1],
+        cluster = x$cluster[1],
+        has_dir = hd,
+        mode_mid = mm,
+        sum_count = sum(x$N),
+        stringsAsFactors = FALSE
+      )
+    }))
 
-  coexist <- data.table::rbindlist(list(res_one, res_two_collapse, res_two_map), use.names = TRUE, fill = TRUE)
-  coexist <- coexist[, .(count = sum(as.numeric(count))), by = .(from, to)]
+    res_two_collapse <- if (any(CONS2$has_dir)) {
+      tmp <- CONS2[CONS2$has_dir, , drop = FALSE]
+      data.frame(from = tmp$mode_mid, to = tmp$mode_mid, count = tmp$sum_count, stringsAsFactors = FALSE)
+    } else {
+      NULL
+    }
 
-  concensus <- data.table::rbindlist(
-    list(cons_one, CONS2[, .(cell, cluster, concensus = mode_mid)]),
-    use.names = TRUE, fill = TRUE
-  )
+    no_dir_keys <- interaction(CONS2$cell[!CONS2$has_dir], CONS2$cluster[!CONS2$has_dir], drop = TRUE, lex.order = TRUE)
+    res_two_map <- if (length(no_dir_keys) > 0) {
+      g2_key <- interaction(groups2$cell, groups2$cluster, drop = TRUE, lex.order = TRUE)
+      g2_sub <- groups2[g2_key %in% no_dir_keys, , drop = FALSE]
+      map_mode <- CONS2[!CONS2$has_dir, c("cell", "cluster", "mode_mid"), drop = FALSE]
+      g2_sub <- merge(g2_sub, map_mode, by = c("cell", "cluster"), all.x = TRUE, sort = FALSE)
+      data.frame(from = g2_sub$mid, to = g2_sub$mode_mid, count = g2_sub$N, stringsAsFactors = FALSE)
+    } else {
+      NULL
+    }
+
+    cons_two <- CONS2[, c("cell", "cluster", "mode_mid"), drop = FALSE]
+    colnames(cons_two)[3] <- "concensus"
+  } else {
+    res_two_collapse <- NULL
+    res_two_map <- NULL
+    cons_two <- NULL
+  }
+
+  coexist <- do.call(rbind, Filter(Negate(is.null), list(res_one, res_two_collapse, res_two_map)))
+  if (is.null(coexist) || nrow(coexist) == 0) {
+    coexist <- data.frame(from = character(), to = character(), count = numeric(), stringsAsFactors = FALSE)
+  } else {
+    coexist <- stats::aggregate(as.numeric(count) ~ from + to, data = coexist, FUN = sum)
+    colnames(coexist)[3] <- "count"
+  }
+
+  concensus <- do.call(rbind, Filter(Negate(is.null), list(cons_one, cons_two)))
+  if (is.null(concensus)) {
+    concensus <- data.frame(cell = character(), cluster = character(), concensus = character(), stringsAsFactors = FALSE)
+  }
 
   list(concensus, coexist)
 }
@@ -295,13 +352,13 @@ cells_nomid_correct <- function(cells, cluster, gene_isoform, polyA) {
 }
 
 cells_build_isoform_dt <- function(data, sites = NULL, flank = 5L, sep = ",", split = "|") {
-  dt <- data.table::as.data.table(data)
+  dt <- as.data.frame(data, stringsAsFactors = FALSE)
 
   if (is.null(sites)) {
     s_num <- suppressWarnings(as.numeric(dt$start))
     e_num <- suppressWarnings(as.numeric(dt$end))
-    dt[, isoform := gsub(" ", "", paste(s_num, e_num, sep = sep), fixed = TRUE)]
-    return(dt[])
+    dt$isoform <- gsub(" ", "", paste(s_num, e_num, sep = sep), fixed = TRUE)
+    return(dt)
   }
 
   sites_num <- suppressWarnings(as.numeric(sites))
@@ -335,7 +392,7 @@ cells_build_isoform_dt <- function(data, sites = NULL, flank = 5L, sep = ",", sp
     e_num[repl_e] <- sites_num[last_idx[repl_e]] + flank
   }
 
-  dt[, isoform := vapply(seq_len(.N), function(i) {
+  dt$isoform <- vapply(seq_len(nrow(dt)), function(i) {
     si <- s_num[i]
     if (is.na(si)) {
       return(NA_character_)
@@ -354,10 +411,10 @@ cells_build_isoform_dt <- function(data, sites = NULL, flank = 5L, sep = ",", sp
       right <- seg[2L * seq_len(k)]
       paste(paste(left, right, sep = sep), collapse = split)
     }
-  }, FUN.VALUE = character(1L))]
+  }, FUN.VALUE = character(1L))
 
-  dt[, isoform := gsub(" ", "", isoform, fixed = TRUE)]
-  dt[]
+  dt$isoform <- gsub(" ", "", dt$isoform, fixed = TRUE)
+  dt
 }
 
 cells_isoform_correct <- function(cells, cluster, gene_isoform, polyA) {

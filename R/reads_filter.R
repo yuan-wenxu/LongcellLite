@@ -60,33 +60,60 @@ isoform_size_filter <- function(isoforms, size, ratio = 0.1, ..., thresh = 10, e
   len <- Longcellsrc::isos_len_cpp(isoforms)
   cluster <- isoform_dis_cluster(isoforms, thresh, eps)
 
-  dt <- data.table::data.table(
+  dt <- data.frame(
     cluster = cluster,
     size = as.numeric(size),
     len = as.numeric(len),
-    ord = seq_len(n)
+    ord = seq_len(n),
+    stringsAsFactors = FALSE
   )
 
-  cw <- dt[, .(weight = sum(size_filter_error(size, ratio))), by = cluster]
-  data.table::setorder(dt, cluster, -size, -len)
-  dt[, rank := seq_len(.N), by = cluster]
-  dt[cw, weight := i.weight, on = "cluster"]
-  dt[, count := as.integer(rank <= weight)]
-  data.table::setorder(dt, ord)
-  dt[["count"]]
+  cw <- do.call(rbind, lapply(split(dt, dt$cluster), function(x) {
+    data.frame(
+      cluster = x$cluster[1],
+      weight = sum(size_filter_error(x$size, ratio)),
+      stringsAsFactors = FALSE
+    )
+  }))
+
+  dt <- dt[order(dt$cluster, -dt$size, -dt$len), , drop = FALSE]
+  dt$rank <- ave(dt$ord, dt$cluster, FUN = seq_along)
+  dt <- merge(dt, cw, by = "cluster", all.x = TRUE, sort = FALSE)
+  dt$count <- as.integer(dt$rank <= dt$weight)
+  dt <- dt[order(dt$ord), , drop = FALSE]
+  dt$count
 }
 
 cells_isoforms_size_filter <- function(cell_isoform_table, ratio = 0.1, ..., thresh = 10, eps = 10) {
-  dt <- data.table::as.data.table(cell_isoform_table)
-  dt[, weight := isoform_size_filter(isoform, size, ratio, ..., thresh = thresh, eps = eps),
-     by = .(cell, mid)]
-  dt[, {
-    sw <- sum(weight)
-    .(
-      size = sum(size),
-      cluster = .N,
-      count = sw,
-      polyA = if (sw > 0) sum(polyA * weight) / sw else NA_real_
+  dt <- as.data.frame(cell_isoform_table, stringsAsFactors = FALSE)
+  group_id <- interaction(dt$cell, dt$mid, drop = TRUE, lex.order = TRUE)
+  split_groups <- split(seq_len(nrow(dt)), group_id)
+
+  dt$weight <- 0L
+  for (idx in split_groups) {
+    dt$weight[idx] <- isoform_size_filter(
+      dt$isoform[idx],
+      dt$size[idx],
+      ratio,
+      ...,
+      thresh = thresh,
+      eps = eps
     )
-  }, by = .(cell, isoform)]
+  }
+
+  out <- do.call(rbind, lapply(split(dt, interaction(dt$cell, dt$isoform, drop = TRUE, lex.order = TRUE)), function(x) {
+    sw <- sum(x$weight)
+    data.frame(
+      cell = x$cell[1],
+      isoform = x$isoform[1],
+      size = sum(x$size),
+      cluster = nrow(x),
+      count = sw,
+      polyA = if (sw > 0) sum(x$polyA * x$weight) / sw else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }))
+
+  rownames(out) <- NULL
+  out
 }
