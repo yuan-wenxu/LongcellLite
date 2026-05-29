@@ -17,6 +17,7 @@ Current scope:
 - optionally map structure-based isoforms to annotated transcripts
 - annotate unmatched isoforms as gene-level novel isoforms
 - export 10X-style gene and isoform matrices
+- write detected-gene and novel-augmented GTF files
 
 ## Input
 
@@ -55,6 +56,7 @@ The current first-version workflow is:
 13. For unmatched isoforms within a known gene, assign novel transcript labels
 14. Classify novel transcripts as `nic` or `nnic`
 15. Write 10X-style `out/gene/` and `out/isoform/` matrices
+16. Write `out/gtf/detected_genes.gtf` and `out/gtf/augmented_with_novel.gtf`
 
 ## Installation
 
@@ -131,12 +133,19 @@ Optional outputs when `--to_isoform` is enabled:
 
 - `out/gene/`
 - `out/isoform/`
+- `out/gtf/detected_genes.gtf`
+- `out/gtf/augmented_with_novel.gtf`
 
 When transcript annotation is enabled, `out/isoform/` may contain:
 
 - known transcript IDs from the input annotation
 - novel isoforms labeled as `GeneName.novelX.nic`
 - novel isoforms labeled as `GeneName.novelX.nnic`
+
+GTF outputs:
+
+- `out/gtf/detected_genes.gtf`: a filtered version of the input GTF that keeps only genes detected in `out/iso_count.tsv`, plus novel transcript and exon records for those detected genes
+- `out/gtf/augmented_with_novel.gtf`: the original input GTF plus transcript and exon records for LongcellLite novel isoforms
 
 Current novel transcript rules:
 

@@ -130,6 +130,12 @@ extract_read_isoforms_from_bam = function(
   prepared_bam_path = NULL,
   init_work_dir = TRUE
 ) {
+  out_path = file.path(work_dir, "read_isoform", "read_isoform.tsv")
+  if (file.exists(out_path) && !overwrite) {
+    warning("The read-level isoform output already exists; reusing cached result.")
+    return(read.table(out_path, header = TRUE, sep = "\t"))
+  }
+
   if (init_work_dir) {
     init_project(work_dir)
   }
@@ -184,6 +190,6 @@ extract_read_isoforms_from_bam = function(
     dplyr::mutate(polyA = polyA.x & polyA.y) %>%
     dplyr::select(-polyA.x, -polyA.y)
 
-  saveResult(reads_bc, file.path(work_dir, "read_isoform", "read_isoform.tsv"))
+  saveResult(reads_bc, out_path)
   reads_bc
 }
