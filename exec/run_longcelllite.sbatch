@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J longcelllite
 #SBATCH -c 16
-#SBATCH --mem=128G
+#SBATCH --mem=64G
 #SBATCH --time=48:00:00
 #SBATCH -o %x_%j.out
 #SBATCH -e %x_%j.err
