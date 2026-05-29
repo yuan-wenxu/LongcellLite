@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH -J longcelllite
 #SBATCH -c 8
+#SBATCH -p amd-ep2,intel-sc3
 #SBATCH --mem=256G
 #SBATCH --time=48:00:00
 #SBATCH -o %x_%j.out
