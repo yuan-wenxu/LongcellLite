@@ -153,17 +153,22 @@ mid_coexist_fast <- function(data) {
     groups2 <- do.call(rbind, lapply(groups2_split, function(x) {
       x$other_mid <- rev(x$mid)
       if (nrow(P) > 0) {
-        x$is_child_of_other <- mapply(function(m, om) any(P$c == m & P$p == om), x$mid, x$other_mid)
+        x$is_child_of_other <- mapply(function(m, om) {
+          any(P$c == m & P$p == om, na.rm = TRUE)
+        }, x$mid, x$other_mid)
       } else {
         x$is_child_of_other <- FALSE
       }
+      x$is_child_of_other[is.na(x$is_child_of_other)] <- FALSE
       x
     }))
     rownames(groups2) <- NULL
 
     CONS2 <- do.call(rbind, lapply(split(groups2, interaction(groups2$cell, groups2$cluster, drop = TRUE, lex.order = TRUE)), function(x) {
-      hd <- sum(x$is_child_of_other) == 1L
-      mm <- if (hd) x$other_mid[x$is_child_of_other][1L] else x$mid[1L]
+      child_flag <- x$is_child_of_other
+      child_flag[is.na(child_flag)] <- FALSE
+      hd <- sum(child_flag, na.rm = TRUE) == 1L
+      mm <- if (isTRUE(hd)) x$other_mid[child_flag][1L] else x$mid[1L]
       data.frame(
         cell = x$cell[1],
         cluster = x$cluster[1],
@@ -174,7 +179,9 @@ mid_coexist_fast <- function(data) {
       )
     }))
 
-    res_two_collapse <- if (any(CONS2$has_dir)) {
+    CONS2$has_dir[is.na(CONS2$has_dir)] <- FALSE
+
+    res_two_collapse <- if (any(CONS2$has_dir, na.rm = TRUE)) {
       tmp <- CONS2[CONS2$has_dir, , drop = FALSE]
       data.frame(from = tmp$mode_mid, to = tmp$mode_mid, count = tmp$sum_count, stringsAsFactors = FALSE)
     } else {
