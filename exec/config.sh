@@ -13,6 +13,7 @@
 # -----------------------------------------------------------------------------
 LONGCELLLITE_DIR="${LONGCELLLITE_DIR:-}"
 PIXI_PROJECT_DIR="${PIXI_PROJECT_DIR:-}"
+HIGH_SPEED_DIR="${HIGH_SPEED_DIR:-}"
 PIXI_ENV="${PIXI_ENV:-long}"
 R_SCRIPT_BIN="${R_SCRIPT_BIN:-Rscript}"
 R_INSTALL_BIN="${R_INSTALL_BIN:-R}"

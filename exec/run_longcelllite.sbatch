@@ -47,6 +47,7 @@ source "${CONFIG_PATH}"
 
 PIXI_PROJECT_DIR="${PIXI_PROJECT_DIR:-}"
 PIXI_ENV="${PIXI_ENV:-long}"
+HIGH_SPEED_DIR="${HIGH_SPEED_DIR:-}"
 R_SCRIPT_BIN="${R_SCRIPT_BIN:-Rscript}"
 R_INSTALL_BIN="${R_INSTALL_BIN:-R}"
 INSTALL_LOCAL_PACKAGE="${INSTALL_LOCAL_PACKAGE:-FALSE}"
@@ -58,11 +59,26 @@ mkdir -p "${RUN_LOG_DIR}"
 LOG_FILE="${RUN_LOG_DIR}/longcelllite_$(date '+%Y%m%d_%H%M%S').log"
 exec >> "${LOG_FILE}" 2>&1
 
+ORIG_WORK_DIR="${WORK_DIR}"
+ORIG_INPUT_BAM="${INPUT_BAM}"
+ORIG_GENOME_FASTA="${GENOME_FASTA}"
+ORIG_GTF_PATH="${GTF_PATH:-}"
+ORIG_GENE_BED_PATH="${GENE_BED_PATH:-}"
+SCRATCH_ROOT=""
+SCRATCH_WORK_DIR=""
+SCRATCH_INPUT_DIR=""
+
 finish_job() {
     local exit_code="$1"
     local end_epoch end_ts elapsed_h elapsed_m elapsed_s
     end_epoch="$(date +%s)"
     end_ts="$(date '+%F %T')"
+
+    if [[ -n "${SCRATCH_WORK_DIR}" && -d "${SCRATCH_WORK_DIR}" ]]; then
+        echo "[${end_ts}] Syncing results back from high-speed storage"
+        sync_dir "${SCRATCH_WORK_DIR}/" "${ORIG_WORK_DIR}/"
+    fi
+
     elapsed_h=$(( (end_epoch - START_EPOCH) / 3600 ))
     elapsed_m=$(( ((end_epoch - START_EPOCH) % 3600) / 60 ))
     elapsed_s=$(( (end_epoch - START_EPOCH) % 60 ))
@@ -86,6 +102,33 @@ require_file() {
     fi
 }
 
+sync_dir() {
+    local src="$1"
+    local dst="$2"
+    mkdir -p "${dst}"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a "${src}" "${dst}"
+    else
+        cp -a "${src}"* "${dst}" 2>/dev/null || true
+    fi
+}
+
+stage_file_to_scratch() {
+    local src="$1"
+    local dst_dir="$2"
+    require_file "Staged input" "${src}"
+    mkdir -p "${dst_dir}"
+    local dst="${dst_dir}/$(basename "${src}")"
+    if [[ ! -f "${dst}" || "${src}" -nt "${dst}" ]]; then
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a "${src}" "${dst}"
+        else
+            cp -a "${src}" "${dst}"
+        fi
+    fi
+    printf '%s\n' "${dst}"
+}
+
 run_in_env() {
     (
         cd "${PIXI_PROJECT_DIR}"
@@ -102,6 +145,7 @@ echo "Config:              ${CONFIG_PATH}"
 echo "Repo:                ${LONGCELLLITE_DIR}"
 echo "Pixi project:        ${PIXI_PROJECT_DIR}"
 echo "Pixi env:            ${PIXI_ENV}"
+echo "High-speed dir:      ${HIGH_SPEED_DIR:-<disabled>}"
 echo "Input BAM:           ${INPUT_BAM}"
 echo "Genome FASTA:        ${GENOME_FASTA}"
 echo "Genome name:         ${GENOME_NAME:-<disabled>}"
@@ -131,6 +175,43 @@ if [[ -n "${GTF_PATH:-}" ]]; then
 fi
 if [[ -n "${GENE_BED_PATH:-}" ]]; then
     require_file "Gene BED annotation" "${GENE_BED_PATH}"
+fi
+
+if [[ -n "${HIGH_SPEED_DIR:-}" ]]; then
+    SCRATCH_ROOT="${HIGH_SPEED_DIR%/}/longcelllite"
+    SCRATCH_WORK_DIR="${SCRATCH_ROOT}/work"
+    SCRATCH_INPUT_DIR="${SCRATCH_ROOT}/inputs"
+
+    echo "[$(date '+%F %T')] Preparing high-speed workspace: ${SCRATCH_ROOT}"
+    mkdir -p "${SCRATCH_WORK_DIR}" "${SCRATCH_INPUT_DIR}"
+
+    if [[ -d "${ORIG_WORK_DIR}" ]] && [[ -n "$(find "${ORIG_WORK_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
+        echo "[$(date '+%F %T')] Syncing existing work directory to high-speed storage"
+        sync_dir "${ORIG_WORK_DIR}/" "${SCRATCH_WORK_DIR}/"
+    fi
+
+    INPUT_BAM="$(stage_file_to_scratch "${ORIG_INPUT_BAM}" "${SCRATCH_INPUT_DIR}")"
+    if [[ -f "${ORIG_INPUT_BAM}.bai" ]]; then
+        stage_file_to_scratch "${ORIG_INPUT_BAM}.bai" "${SCRATCH_INPUT_DIR}" >/dev/null
+    elif [[ -f "${ORIG_INPUT_BAM%.bam}.bai" ]]; then
+        stage_file_to_scratch "${ORIG_INPUT_BAM%.bam}.bai" "${SCRATCH_INPUT_DIR}" >/dev/null
+    fi
+
+    GENOME_FASTA="$(stage_file_to_scratch "${ORIG_GENOME_FASTA}" "${SCRATCH_INPUT_DIR}")"
+    if [[ -n "${ORIG_GTF_PATH:-}" ]]; then
+        GTF_PATH="$(stage_file_to_scratch "${ORIG_GTF_PATH}" "${SCRATCH_INPUT_DIR}")"
+    fi
+    if [[ -n "${ORIG_GENE_BED_PATH:-}" ]]; then
+        GENE_BED_PATH="$(stage_file_to_scratch "${ORIG_GENE_BED_PATH}" "${SCRATCH_INPUT_DIR}")"
+    fi
+    WORK_DIR="${SCRATCH_WORK_DIR}"
+
+    echo "[$(date '+%F %T')] Running from high-speed workspace"
+    echo "Scratch BAM:         ${INPUT_BAM}"
+    echo "Scratch FASTA:       ${GENOME_FASTA}"
+    echo "Scratch GTF:         ${GTF_PATH:-<disabled>}"
+    echo "Scratch gene BED:    ${GENE_BED_PATH:-<disabled>}"
+    echo "Scratch work dir:    ${WORK_DIR}"
 fi
 
 if bool_is_true "${INSTALL_LOCAL_PACKAGE}"; then
