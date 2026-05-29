@@ -43,7 +43,7 @@ extract_bc_from_qname_vector = function(
   )
 }
 
-prepare_input_bam = function(input_bam_path, work_dir, samtools = "samtools", force = FALSE) {
+prepare_input_bam = function(input_bam_path, work_dir, samtools = "samtools", samtools_threads = 1, force = FALSE) {
   if (!file.exists(input_bam_path)) {
     stop(sprintf("Input BAM does not exist: %s", input_bam_path))
   }
@@ -53,7 +53,8 @@ prepare_input_bam = function(input_bam_path, work_dir, samtools = "samtools", fo
   has_index = any(file.exists(input_bai_candidates))
 
   if (!has_index || force) {
-    system(paste(c(samtools, "index", input_bam_path), collapse = " "))
+    threads = max(1L, as.integer(samtools_threads))
+    system(paste(c(samtools, "index", "-@", threads, input_bam_path), collapse = " "))
   }
 
   input_bam_path

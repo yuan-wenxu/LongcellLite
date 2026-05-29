@@ -171,6 +171,7 @@ run_longcelllite <- function(bam_path,
                              splice_site_bin = 2,
                              bedtools = "bedtools",
                              samtools = "samtools",
+                             samtools_threads = 1,
                              cores = 1,
                              overwrite = FALSE,
                              to_isoform = TRUE,
@@ -183,7 +184,13 @@ run_longcelllite <- function(bam_path,
   gene_bed = annot[[1]]
   gtf = annot[[2]]
   genome = load_genome(genome_name = genome_name, genome_path = genome_path)
-  prepared_bam_path = prepare_input_bam(bam_path, work_dir = work_dir, samtools = samtools, force = overwrite)
+  prepared_bam_path = prepare_input_bam(
+    bam_path,
+    work_dir = work_dir,
+    samtools = samtools,
+    samtools_threads = samtools_threads,
+    force = overwrite
+  )
 
   reads_bc = extract_read_isoforms_from_bam(
     bam_path = bam_path,
@@ -200,6 +207,7 @@ run_longcelllite <- function(bam_path,
     splice_site_bin = splice_site_bin,
     bedtools = bedtools,
     samtools = samtools,
+    samtools_threads = samtools_threads,
     cores = cores,
     overwrite = overwrite,
     gene_bed = gene_bed,

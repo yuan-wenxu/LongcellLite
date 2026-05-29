@@ -123,6 +123,7 @@ extract_read_isoforms_from_bam = function(
   splice_site_bin = 2,
   bedtools = "bedtools",
   samtools = "samtools",
+  samtools_threads = 1,
   cores = 1,
   overwrite = FALSE,
   gene_bed = NULL,
@@ -147,7 +148,13 @@ extract_read_isoforms_from_bam = function(
     genome = load_genome(genome_name = genome_name, genome_path = genome_path)
   }
   if (is.null(prepared_bam_path)) {
-    prepared_bam_path = prepare_input_bam(bam_path, work_dir = work_dir, samtools = samtools, force = overwrite)
+    prepared_bam_path = prepare_input_bam(
+      bam_path,
+      work_dir = work_dir,
+      samtools = samtools,
+      samtools_threads = samtools_threads,
+      force = overwrite
+    )
   }
 
   gene_range = gene_bed %>% dplyr::group_by(gene) %>%

@@ -60,4 +60,5 @@ FILTER_ONLY_INTRON="${FILTER_ONLY_INTRON:-TRUE}" # TRUE/FALSE
 # Tool paths
 # -----------------------------------------------------------------------------
 SAMTOOLS_BIN="${SAMTOOLS_BIN:-samtools}"
+SAMTOOLS_THREADS="${SAMTOOLS_THREADS:-8}"
 BEDTOOLS_BIN="${BEDTOOLS_BIN:-bedtools}"

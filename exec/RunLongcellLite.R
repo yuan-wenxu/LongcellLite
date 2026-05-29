@@ -17,6 +17,7 @@ p$add_argument("--map_qual", default = 30, type = "integer", help = "Minimum map
 p$add_argument("--end_flank", default = 200, type = "integer", help = "Flanking region size for TSS/TES assignment")
 p$add_argument("--splice_site_bin", default = 2, type = "integer", help = "Bin size for splice site assignment")
 p$add_argument("--samtools", default = "samtools", help = "samtools binary")
+p$add_argument("--samtools_threads", default = 1, type = "integer", help = "Threads for external samtools commands")
 p$add_argument("--bedtools", default = "bedtools", help = "bedtools binary")
 p$add_argument("--cores", default = 1, type = "integer", help = "Number of cores")
 p$add_argument("--overwrite", action = "store_true", help = "Overwrite cached outputs")
@@ -43,6 +44,7 @@ run_longcelllite(
   splice_site_bin = args$splice_site_bin,
   bedtools = args$bedtools,
   samtools = args$samtools,
+  samtools_threads = args$samtools_threads,
   cores = args$cores,
   overwrite = isTRUE(args$overwrite),
   to_isoform = isTRUE(args$to_isoform),
