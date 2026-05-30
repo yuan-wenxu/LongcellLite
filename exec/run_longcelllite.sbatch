@@ -88,6 +88,10 @@ finish_job() {
         echo "[${end_ts}] Syncing results back from high-speed storage"
         sync_dir "${SCRATCH_WORK_DIR}/" "${ORIG_WORK_DIR}/"
     fi
+    if [[ -n "${SCRATCH_ROOT}" && -d "${SCRATCH_ROOT}" ]]; then
+        echo "[${end_ts}] Removing high-speed scratch directory"
+        rm -rf "${SCRATCH_ROOT}"
+    fi
 
     elapsed_h=$(( (end_epoch - START_EPOCH) / 3600 ))
     elapsed_m=$(( ((end_epoch - START_EPOCH) % 3600) / 60 ))
