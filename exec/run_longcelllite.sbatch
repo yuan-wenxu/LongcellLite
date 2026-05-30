@@ -56,11 +56,6 @@ INSTALL_LOCAL_PACKAGE="${INSTALL_LOCAL_PACKAGE:-FALSE}"
 LONGCELLLITE_DIR="${LONGCELLLITE_DIR:-${LONGCELLLITE_DIR}}"
 RUN_LOG_DIR="${RUN_LOG_DIR:-${WORK_DIR}/logs}"
 
-mkdir -p "${WORK_DIR}"
-mkdir -p "${RUN_LOG_DIR}"
-LOG_FILE="${RUN_LOG_DIR}/longcelllite_$(date '+%Y%m%d_%H%M%S').log"
-exec >> "${LOG_FILE}" 2>&1
-
 ORIG_WORK_DIR="${WORK_DIR}"
 ORIG_INPUT_BAM="${INPUT_BAM}"
 ORIG_GENOME_FASTA="${GENOME_FASTA}"
@@ -69,6 +64,19 @@ ORIG_GENE_BED_PATH="${GENE_BED_PATH:-}"
 SCRATCH_ROOT=""
 SCRATCH_WORK_DIR=""
 SCRATCH_INPUT_DIR=""
+
+if [[ -n "${HIGH_SPEED_DIR:-}" ]]; then
+    SCRATCH_ROOT="${HIGH_SPEED_DIR%/}/longcelllite"
+    SCRATCH_WORK_DIR="${SCRATCH_ROOT}/work"
+    SCRATCH_INPUT_DIR="${SCRATCH_ROOT}/inputs"
+    WORK_DIR="${SCRATCH_WORK_DIR}"
+    RUN_LOG_DIR="${SCRATCH_WORK_DIR}/logs"
+fi
+
+mkdir -p "${WORK_DIR}"
+mkdir -p "${RUN_LOG_DIR}"
+LOG_FILE="${RUN_LOG_DIR}/longcelllite_$(date '+%Y%m%d_%H%M%S').log"
+exec >> "${LOG_FILE}" 2>&1
 
 finish_job() {
     local exit_code="$1"
@@ -143,24 +151,24 @@ bool_is_true() {
 }
 
 echo "[${START_TS}] LongcellLite job starting"
-echo "Config:              ${CONFIG_PATH}"
-echo "Repo:                ${LONGCELLLITE_DIR}"
-echo "Pixi project:        ${PIXI_PROJECT_DIR}"
-echo "Pixi env:            ${PIXI_ENV}"
-echo "High-speed dir:      ${HIGH_SPEED_DIR:-<disabled>}"
-echo "Input BAM:           ${INPUT_BAM}"
-echo "Genome FASTA:        ${GENOME_FASTA}"
-echo "Genome name:         ${GENOME_NAME:-<disabled>}"
-echo "GTF:                 ${GTF_PATH:-<disabled>}"
-echo "Gene BED:            ${GENE_BED_PATH:-<disabled>}"
-echo "Work dir:            ${WORK_DIR}"
-echo "Cores:               ${CORES}"
-echo "Toolkit:             ${TOOLKIT}"
-echo "to_isoform:          ${TO_ISOFORM}"
-echo "overwrite:           ${OVERWRITE}"
-echo "filter_only_intron:  ${FILTER_ONLY_INTRON}"
-echo "samtools threads:    ${SAMTOOLS_THREADS}"
-echo "Install local pkg:   ${INSTALL_LOCAL_PACKAGE}"
+echo "[$(date '+%F %T')] Config:              ${CONFIG_PATH}"
+echo "[$(date '+%F %T')] Repo:                ${LONGCELLLITE_DIR}"
+echo "[$(date '+%F %T')] Pixi project:        ${PIXI_PROJECT_DIR}"
+echo "[$(date '+%F %T')] Pixi env:            ${PIXI_ENV}"
+echo "[$(date '+%F %T')] High-speed dir:      ${HIGH_SPEED_DIR:-<disabled>}"
+echo "[$(date '+%F %T')] Input BAM:           ${INPUT_BAM}"
+echo "[$(date '+%F %T')] Genome FASTA:        ${GENOME_FASTA}"
+echo "[$(date '+%F %T')] Genome name:         ${GENOME_NAME:-<disabled>}"
+echo "[$(date '+%F %T')] GTF:                 ${GTF_PATH:-<disabled>}"
+echo "[$(date '+%F %T')] Gene BED:            ${GENE_BED_PATH:-<disabled>}"
+echo "[$(date '+%F %T')] Work dir:            ${WORK_DIR}"
+echo "[$(date '+%F %T')] Cores:               ${CORES}"
+echo "[$(date '+%F %T')] Toolkit:             ${TOOLKIT}"
+echo "[$(date '+%F %T')] to_isoform:          ${TO_ISOFORM}"
+echo "[$(date '+%F %T')] overwrite:           ${OVERWRITE}"
+echo "[$(date '+%F %T')] filter_only_intron:  ${FILTER_ONLY_INTRON}"
+echo "[$(date '+%F %T')] samtools threads:    ${SAMTOOLS_THREADS}"
+echo "[$(date '+%F %T')] Install local pkg:   ${INSTALL_LOCAL_PACKAGE}"
 
 require_file "LongcellLite entry script" "${LONGCELLLITE_DIR}/exec/RunLongcellLite.R"
 require_file "Input BAM" "${INPUT_BAM}"
@@ -180,10 +188,6 @@ if [[ -n "${GENE_BED_PATH:-}" ]]; then
 fi
 
 if [[ -n "${HIGH_SPEED_DIR:-}" ]]; then
-    SCRATCH_ROOT="${HIGH_SPEED_DIR%/}/longcelllite"
-    SCRATCH_WORK_DIR="${SCRATCH_ROOT}/work"
-    SCRATCH_INPUT_DIR="${SCRATCH_ROOT}/inputs"
-
     echo "[$(date '+%F %T')] Preparing high-speed workspace: ${SCRATCH_ROOT}"
     mkdir -p "${SCRATCH_WORK_DIR}" "${SCRATCH_INPUT_DIR}"
 
@@ -209,11 +213,11 @@ if [[ -n "${HIGH_SPEED_DIR:-}" ]]; then
     WORK_DIR="${SCRATCH_WORK_DIR}"
 
     echo "[$(date '+%F %T')] Running from high-speed workspace"
-    echo "Scratch BAM:         ${INPUT_BAM}"
-    echo "Scratch FASTA:       ${GENOME_FASTA}"
-    echo "Scratch GTF:         ${GTF_PATH:-<disabled>}"
-    echo "Scratch gene BED:    ${GENE_BED_PATH:-<disabled>}"
-    echo "Scratch work dir:    ${WORK_DIR}"
+    echo "[$(date '+%F %T')] Scratch BAM:         ${INPUT_BAM}"
+    echo "[$(date '+%F %T')] Scratch FASTA:       ${GENOME_FASTA}"
+    echo "[$(date '+%F %T')] Scratch GTF:         ${GTF_PATH:-<disabled>}"
+    echo "[$(date '+%F %T')] Scratch gene BED:    ${GENE_BED_PATH:-<disabled>}"
+    echo "[$(date '+%F %T')] Scratch work dir:    ${WORK_DIR}"
 fi
 
 if bool_is_true "${INSTALL_LOCAL_PACKAGE}"; then
