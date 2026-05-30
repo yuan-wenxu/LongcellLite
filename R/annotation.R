@@ -111,7 +111,7 @@ annotation = function(
   cached_gtf = file.path(work_dir, "annotation", "exon_gtf.rds")
 
   if (file.exists(cached_gene_bed) && !overwrite) {
-    warning("The annotation already exists. Set overwrite = TRUE to rebuild it.")
+    cat("Annotation result already exists, skipping this step.\n")
     gene_bed = readRDS(cached_gene_bed)
     gtf = if (file.exists(cached_gtf)) readRDS(cached_gtf) else NULL
     return(list(gene_bed, gtf))

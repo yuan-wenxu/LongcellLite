@@ -123,7 +123,7 @@ umi_count_parallel <- function(data, dir, gene_bed,
 
   out_path = file.path(dir, "iso_count.tsv")
   if (file.exists(out_path) && !force_UMI_dedup) {
-    warning("The UMI deduplication output already exists; reusing cached result.")
+    cat("UMI deduplication result already exists, skipping this step.\n")
     return(read.table(out_path, header = TRUE, sep = "\t"))
   }
 

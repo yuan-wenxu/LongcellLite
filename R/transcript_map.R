@@ -171,6 +171,38 @@ annotate_novel_isoforms = function(
   annotation
 }
 
+novel_index_to_models = function(novel_index, gene, gene_info, split = "|", sep = ",") {
+  if (is.null(novel_index) || nrow(novel_index) == 0) {
+    return(NULL)
+  }
+  if (is.null(gene_info) || nrow(gene_info) == 0) {
+    return(NULL)
+  }
+
+  novel_models = unique(
+    novel_index[, c("transname", "novel_class", "novel_signature")]
+  )
+  novel_models$gene = gene
+  novel_models$chr = gene_info$chr[1]
+  novel_models$strand = as.character(gene_info$strand[1])
+  novel_models$start = vapply(
+    strsplit(novel_models$novel_signature, split = split, fixed = TRUE),
+    function(x) {
+      as.numeric(strsplit(x[1], split = sep, fixed = TRUE)[[1]][1])
+    },
+    FUN.VALUE = numeric(1)
+  )
+  novel_models$end = vapply(
+    strsplit(novel_models$novel_signature, split = split, fixed = TRUE),
+    function(x) {
+      last_bin = x[length(x)]
+      as.numeric(strsplit(last_bin, split = sep, fixed = TRUE)[[1]][2])
+    },
+    FUN.VALUE = numeric(1)
+  )
+  novel_models
+}
+
 read_gtf_lines = function(gtf_path) {
   con = if (grepl("\\.gz$", gtf_path, ignore.case = TRUE)) {
     gzfile(gtf_path, open = "rt")
@@ -198,29 +230,7 @@ normalize_gene_id = function(x) {
   sub("\\..*$", "", x)
 }
 
-filter_gtf_to_detected_genes = function(gtf_path, genes, out_path) {
-  lines = read_gtf_lines(gtf_path)
-  header = lines[grepl("^#", lines)]
-  body = lines[!grepl("^#", lines)]
-  if (length(body) == 0) {
-    writeLines(header, out_path)
-    return(invisible(NULL))
-  }
-
-  fields = strsplit(body, "\t", fixed = TRUE)
-  attrs = vapply(
-    fields,
-    function(x) if (length(x) >= 9) x[9] else "",
-    FUN.VALUE = character(1)
-  )
-  gene_ids = normalize_gene_id(extract_gtf_attribute(attrs, "gene_id"))
-  keep = !is.na(gene_ids) & gene_ids %in% genes
-
-  writeLines(c(header, body[keep]), out_path)
-  invisible(NULL)
-}
-
-detected_gtf_lines = function(gtf_path, genes) {
+detected_transcript_gtf_lines = function(gtf_path, transcripts, genes = character(), cores = 1) {
   lines = read_gtf_lines(gtf_path)
   header = lines[grepl("^#", lines)]
   body = lines[!grepl("^#", lines)]
@@ -228,14 +238,35 @@ detected_gtf_lines = function(gtf_path, genes) {
     return(header)
   }
 
-  fields = strsplit(body, "\t", fixed = TRUE)
-  attrs = vapply(
-    fields,
-    function(x) if (length(x) >= 9) x[9] else "",
-    FUN.VALUE = character(1)
-  )
-  gene_ids = normalize_gene_id(extract_gtf_attribute(attrs, "gene_id"))
-  keep = !is.na(gene_ids) & gene_ids %in% genes
+  transcripts = unique(as.character(transcripts))
+  transcripts = transcripts[!is.na(transcripts) & nzchar(transcripts)]
+  genes = unique(as.character(genes))
+  genes = genes[!is.na(genes) & nzchar(genes)]
+
+  chunks = split_indices(length(body), cores)
+  chunk_fun = function(idx) {
+    sub_body = body[idx]
+    fields = strsplit(sub_body, "\t", fixed = TRUE)
+    feature = vapply(
+      fields,
+      function(x) if (length(x) >= 3) x[3] else "",
+      FUN.VALUE = character(1)
+    )
+    attrs = vapply(
+      fields,
+      function(x) if (length(x) >= 9) x[9] else "",
+      FUN.VALUE = character(1)
+    )
+    gene_ids = normalize_gene_id(extract_gtf_attribute(attrs, "gene_id"))
+    transcript_ids = extract_gtf_attribute(attrs, "transcript_id")
+    (!is.na(transcript_ids) & transcript_ids %in% transcripts) |
+      (feature == "gene" & !is.na(gene_ids) & gene_ids %in% genes)
+  }
+  if (cores > 1 && length(chunks) > 1) {
+    keep = unlist(parallel::mclapply(chunks, chunk_fun, mc.cores = min(cores, length(chunks))), use.names = FALSE)
+  } else {
+    keep = unlist(lapply(chunks, chunk_fun), use.names = FALSE)
+  }
 
   c(header, body[keep])
 }
@@ -277,116 +308,52 @@ gtf_gene_metadata = function(gtf_path) {
   meta
 }
 
-collect_novel_transcript_models = function(
-  data,
+split_gtf_by_gene = function(
   gtf,
-  gene_bed,
-  thresh = 3,
-  overlap_thresh = 0,
-  filter_only_intron = TRUE,
   gene_col = "gene",
-  transcript_col = "isoform",
-  gtf_gene_col = "gene",
-  gtf_iso_col = "transname",
-  gtf_start_col = "start",
-  gtf_end_col = "end",
-  bed_gene_col = "gene",
-  bed_chr_col = "chr",
-  bed_strand_col = "strand",
-  split = "|",
-  sep = ","
+  iso_col = "transname",
+  start_col = "start",
+  end_col = "end"
 ) {
-  data = as.data.frame(data)
-  gene_uniq = unique(as.character(data[[gene_col]]))
+  if (is.null(gtf) || nrow(gtf) == 0) {
+    return(list())
+  }
 
-  out = lapply(gene_uniq, function(i) {
-    sub_data = data %>% dplyr::filter(.data[[gene_col]] == i)
-    sub_gtf = gtf %>%
-      dplyr::filter(.data[[gtf_gene_col]] == i) %>%
-      dplyr::arrange(.data[[gtf_iso_col]], .data[[gtf_start_col]], .data[[gtf_end_col]])
+  gtf = as.data.frame(gtf) %>%
+    dplyr::arrange(.data[[gene_col]], .data[[iso_col]], .data[[start_col]], .data[[end_col]])
+  split(gtf, as.character(gtf[[gene_col]]))
+}
 
-    if (filter_only_intron && nrow(sub_gtf) > 0) {
-      transcripts_uniq = unique(sub_data[[transcript_col]])
-      intron_flag = intron_only(transcripts_uniq, sub_gtf, gtf_start_col, gtf_end_col, sep, split)
-      transcripts_uniq = transcripts_uniq[!intron_flag]
-      if (length(transcripts_uniq) == 0) {
-        return(NULL)
-      }
-      sub_data = sub_data %>% dplyr::filter(.data[[transcript_col]] %in% transcripts_uniq)
-    }
+build_gene_info_index = function(
+  gene_bed,
+  gene_col = "gene",
+  chr_col = "chr",
+  strand_col = "strand"
+) {
+  if (is.null(gene_bed) || nrow(gene_bed) == 0) {
+    return(list())
+  }
 
-    iso_index = NULL
-    if (nrow(sub_gtf) > 0) {
-      iso_index = iso_corres(
-        sub_data[[transcript_col]], gene = i, gtf = sub_gtf, thresh = thresh,
-        overlap_thresh = overlap_thresh, gtf_gene_col = gtf_gene_col,
-        gtf_iso_col = gtf_iso_col, gtf_start_col = gtf_start_col,
-        gtf_end_col = gtf_end_col, sep = sep, split = split
-      )
-    }
+  info = gene_bed %>%
+    dplyr::group_by(.data[[gene_col]]) %>%
+    dplyr::summarise(
+      chr = dplyr::first(.data[[chr_col]]),
+      strand = as.character(dplyr::first(.data[[strand_col]])),
+      .groups = "drop"
+  )
+  split(info, as.character(info[[gene_col]]))
+}
 
-    matched_isoforms = if (is.null(iso_index)) {
-      character()
-    } else {
-      unique(as.character(iso_index$isoform))
-    }
-    novel_isoforms = unique(as.character(
-      sub_data[[transcript_col]][!(sub_data[[transcript_col]] %in% matched_isoforms)]
-    ))
-    if (length(novel_isoforms) == 0) {
-      return(NULL)
-    }
+split_indices = function(n, chunks) {
+  if (n <= 0) {
+    return(list(integer()))
+  }
 
-    novel_index = annotate_novel_isoforms(
-      novel_isoforms,
-      gene = i,
-      gtf = sub_gtf,
-      thresh = thresh,
-      gtf_start_col = gtf_start_col,
-      gtf_end_col = gtf_end_col,
-      sep = sep,
-      split = split
-    )
-    if (is.null(novel_index) || nrow(novel_index) == 0) {
-      return(NULL)
-    }
-
-    gene_info = gene_bed %>%
-      dplyr::filter(.data[[bed_gene_col]] == i) %>%
-      dplyr::summarise(
-        chr = dplyr::first(.data[[bed_chr_col]]),
-        strand = dplyr::first(.data[[bed_strand_col]]),
-        .groups = "drop"
-      )
-    if (nrow(gene_info) == 0) {
-      return(NULL)
-    }
-
-    novel_models = unique(
-      novel_index[, c("transname", "novel_class", "novel_signature")]
-    )
-    novel_models$gene = i
-    novel_models$chr = gene_info$chr[1]
-    novel_models$strand = as.character(gene_info$strand[1])
-    novel_models$start = vapply(
-      strsplit(novel_models$novel_signature, split = split, fixed = TRUE),
-      function(x) {
-        as.numeric(strsplit(x[1], split = sep, fixed = TRUE)[[1]][1])
-      },
-      FUN.VALUE = numeric(1)
-    )
-    novel_models$end = vapply(
-      strsplit(novel_models$novel_signature, split = split, fixed = TRUE),
-      function(x) {
-        last_bin = x[length(x)]
-        as.numeric(strsplit(last_bin, split = sep, fixed = TRUE)[[1]][2])
-      },
-      FUN.VALUE = numeric(1)
-    )
-    novel_models
-  })
-
-  do.call(rbind, out)
+  chunks = max(1L, min(as.integer(chunks), n))
+  if (chunks == 1L) {
+    return(list(seq_len(n)))
+  }
+  split(seq_len(n), cut(seq_len(n), breaks = chunks, labels = FALSE))
 }
 
 novel_models_to_gtf_lines = function(
@@ -394,7 +361,8 @@ novel_models_to_gtf_lines = function(
   gene_meta,
   source = "LongcellLite",
   split = "|",
-  sep = ","
+  sep = ",",
+  cores = 1
 ) {
   if (is.null(novel_models) || nrow(novel_models) == 0) {
     return(character())
@@ -410,87 +378,97 @@ novel_models_to_gtf_lines = function(
     )
   }
 
-  lines = unlist(lapply(seq_len(nrow(novel_models)), function(i) {
-    row = novel_models[i, , drop = FALSE]
-    meta = gene_meta[match(row$gene, gene_meta$gene), , drop = FALSE]
-    gene_name = if (nrow(meta) == 1 &&
-        !is.na(meta$gene_name) &&
-        nzchar(meta$gene_name)) {
-      meta$gene_name
-    } else {
-      row$gene
-    }
-    gene_type = if (nrow(meta) == 1 &&
-        !is.na(meta$gene_type) &&
-        nzchar(meta$gene_type)) {
-      meta$gene_type
-    } else {
-      "novel_transcript"
-    }
+  chunks = split_indices(nrow(novel_models), cores)
+  chunk_fun = function(idx) {
+    unlist(lapply(idx, function(i) {
+      row = novel_models[i, , drop = FALSE]
+      meta = gene_meta[match(row$gene, gene_meta$gene), , drop = FALSE]
+      gene_name = if (nrow(meta) == 1 &&
+          !is.na(meta$gene_name) &&
+          nzchar(meta$gene_name)) {
+        meta$gene_name
+      } else {
+        row$gene
+      }
+      gene_type = if (nrow(meta) == 1 &&
+          !is.na(meta$gene_type) &&
+          nzchar(meta$gene_type)) {
+        meta$gene_type
+      } else {
+        "novel_transcript"
+      }
 
-    transcript_attr = paste0(
-      'gene_id "', row$gene, '"; ',
-      'transcript_id "', row$transname, '"; ',
-      'gene_name "', gene_name, '"; ',
-      'transcript_name "', row$transname, '"; ',
-      'gene_type "', gene_type, '"; ',
-      'transcript_type "', row$novel_class, '"; ',
-      'novel_class "', row$novel_class, '";'
-    )
-
-    transcript_line = paste(
-      row$chr, source, "transcript", row$start, row$end, ".", row$strand, ".",
-      transcript_attr,
-      sep = "\t"
-    )
-
-    bins = read2bins(as.character(row$novel_signature), sep = sep, split = split)
-    exon_lines = vapply(seq_len(nrow(bins)), function(j) {
-      exon_attr = paste0(
+      transcript_attr = paste0(
         'gene_id "', row$gene, '"; ',
         'transcript_id "', row$transname, '"; ',
         'gene_name "', gene_name, '"; ',
         'transcript_name "', row$transname, '"; ',
         'gene_type "', gene_type, '"; ',
         'transcript_type "', row$novel_class, '"; ',
-        'novel_class "', row$novel_class, '"; ',
-        'exon_number ', j, '; ',
-        'exon_id "', row$transname, '.exon', j, '";'
+        'novel_class "', row$novel_class, '";'
       )
-      paste(
-        row$chr, source, "exon", bins$start[j], bins$end[j], ".", row$strand, ".",
-        exon_attr,
+
+      transcript_line = paste(
+        row$chr, source, "transcript", row$start, row$end, ".", row$strand, ".",
+        transcript_attr,
         sep = "\t"
       )
-    }, FUN.VALUE = character(1))
 
-    c(transcript_line, exon_lines)
-  }))
+      bins = read2bins(as.character(row$novel_signature), sep = sep, split = split)
+      exon_lines = vapply(seq_len(nrow(bins)), function(j) {
+        exon_attr = paste0(
+          'gene_id "', row$gene, '"; ',
+          'transcript_id "', row$transname, '"; ',
+          'gene_name "', gene_name, '"; ',
+          'transcript_name "', row$transname, '"; ',
+          'gene_type "', gene_type, '"; ',
+          'transcript_type "', row$novel_class, '"; ',
+          'novel_class "', row$novel_class, '"; ',
+          'exon_number ', j, '; ',
+          'exon_id "', row$transname, '.exon', j, '";'
+        )
+        paste(
+          row$chr, source, "exon", bins$start[j], bins$end[j], ".", row$strand, ".",
+          exon_attr,
+          sep = "\t"
+        )
+      }, FUN.VALUE = character(1))
+
+      c(transcript_line, exon_lines)
+    }), use.names = FALSE)
+  }
+  if (cores > 1 && length(chunks) > 1) {
+    lines = unlist(parallel::mclapply(chunks, chunk_fun, mc.cores = min(cores, length(chunks))), use.names = FALSE)
+  } else {
+    lines = unlist(lapply(chunks, chunk_fun), use.names = FALSE)
+  }
 
   lines
 }
 
-write_augmented_gtf = function(gtf_path, novel_models, out_path, split = "|", sep = ",") {
+write_augmented_gtf = function(gtf_path, novel_models, out_path, split = "|", sep = ",", cores = 1) {
   original_lines = read_gtf_lines(gtf_path)
   novel_lines = novel_models_to_gtf_lines(
     novel_models,
     gtf_gene_metadata(gtf_path),
     split = split,
-    sep = sep
+    sep = sep,
+    cores = cores
   )
   writeLines(c(original_lines, novel_lines), out_path)
   invisible(NULL)
 }
 
-write_detected_genes_gtf = function(gtf_path, genes, novel_models, out_path, split = "|", sep = ",") {
-  base_lines = detected_gtf_lines(gtf_path, genes)
-  novel_lines = novel_models_to_gtf_lines(
-    novel_models,
-    gtf_gene_metadata(gtf_path),
-    split = split,
-    sep = sep
+write_detected_transcripts_gtf = function(gtf_path, transcripts, genes, out_path, cores = 1) {
+  writeLines(
+    detected_transcript_gtf_lines(
+      gtf_path,
+      transcripts = transcripts,
+      genes = genes,
+      cores = cores
+    ),
+    out_path
   )
-  writeLines(c(base_lines, novel_lines), out_path)
   invisible(NULL)
 }
 
@@ -561,15 +539,34 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
                                   transcript_col = "isoform", count_col = "count",
                                   gtf_gene_col = "gene", gtf_iso_col = "transname",
                                   gtf_start_col = "start", gtf_end_col = "end",
-                                  split = "|", sep = ",") {
+                                  split = "|", sep = ",",
+                                  data_by_gene = NULL, gtf_by_gene = NULL,
+                                  gene_info_by_gene = NULL, return_novel_models = FALSE) {
   data = as.data.frame(data)
   gene_uniq = unique(data[, gene_col])
+  if (is.null(data_by_gene)) {
+    data_by_gene = split(data, as.character(data[[gene_col]]))
+  }
+  if (is.null(gtf_by_gene)) {
+    gtf_by_gene = split_gtf_by_gene(
+      gtf,
+      gene_col = gtf_gene_col,
+      iso_col = gtf_iso_col,
+      start_col = gtf_start_col,
+      end_col = gtf_end_col
+    )
+  }
 
   out = lapply(gene_uniq, function(i) {
-    sub_data = data %>% dplyr::filter(.data[[gene_col]] == i)
-    sub_gtf = gtf %>%
-      dplyr::filter(.data[[gtf_gene_col]] == i) %>%
-      dplyr::arrange(.data[[gtf_iso_col]], .data[[gtf_start_col]], .data[[gtf_end_col]])
+    sub_data = data_by_gene[[i]]
+    sub_gtf = gtf_by_gene[[i]]
+    if (is.null(sub_gtf)) {
+      sub_gtf = gtf[0, , drop = FALSE]
+    }
+    gene_info = NULL
+    if (!is.null(gene_info_by_gene)) {
+      gene_info = gene_info_by_gene[[i]]
+    }
 
     if (filter_only_intron && nrow(sub_gtf) > 0) {
       transcripts_uniq = unique(sub_data[, transcript_col])
@@ -596,6 +593,7 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
     novel_sub_data = sub_data %>% dplyr::filter(!(.data[[transcript_col]] %in% matched_isoforms))
 
     known_out = NULL
+    novel_models = NULL
     if (!is.null(iso_index) && nrow(known_sub_data) > 0) {
       iso_index_weight = tidyr::pivot_wider(
         iso_index[, c("isoform", "weight", "transname")],
@@ -638,16 +636,29 @@ cells_genes_isos_count = function(data, gtf, thresh = 3, overlap_thresh = 0,
         dplyr::group_by(.data[[cell_col]], transname) %>%
         dplyr::summarise(count = sum(.data[[count_col]]), .groups = "drop")
       colnames(novel_out) = c("cell", "isoform", "count")
+      novel_models = novel_index_to_models(novel_index, i, gene_info, split = split, sep = sep)
     }
 
     sub_out = dplyr::bind_rows(known_out, novel_out)
     if (is.null(sub_out) || nrow(sub_out) == 0) {
-      return(NULL)
+      return(list(count = NULL, novel_models = novel_models))
     }
     sub_out$gene = i
-    sub_out
+    list(count = sub_out, novel_models = novel_models)
   })
-  do.call(rbind, out)
+  if (return_novel_models) {
+    count_out = Filter(Negate(is.null), lapply(out, `[[`, "count"))
+    novel_out = Filter(Negate(is.null), lapply(out, `[[`, "novel_models"))
+    return(list(
+      count = if (length(count_out) > 0) as.data.frame(do.call(dplyr::bind_rows, count_out)) else NULL,
+      novel_models = if (length(novel_out) > 0) {
+        as.data.frame(do.call(dplyr::bind_rows, novel_out)) %>% dplyr::distinct()
+      } else {
+        NULL
+      }
+    ))
+  }
+  do.call(rbind, lapply(out, `[[`, "count"))
 }
 
 UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col = "gene",
@@ -664,77 +675,100 @@ UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col =
   }
 
   cores = coreDetect(cores)
-  data_split = genes_distribute(umi_count, 16 * cores, gene_col)
-  count_mat_fun = function(x) {
-    if (is.null(x)) {
-      return(NULL)
-    }
-    sub_count_mat = cells_genes_isos_count(
-      x, gtf,
-      thresh = mid_offset_thresh,
-      overlap_thresh = overlap_thresh,
-      filter_only_intron = filter_only_intron,
-      gtf_gene_col = gtf_gene_col,
-      gtf_iso_col = gtf_iso_col,
-      gtf_start_col = gtf_start_col,
-      gtf_end_col = gtf_end_col,
-      split = split, sep = sep
-    )
-    if (length(sub_count_mat) == 0 || nrow(sub_count_mat) == 0) {
-      return(NULL)
-    }
-    sub_count_mat
-  }
-
-  if (cores > 1) {
-    count_mat = parallel::mclapply(data_split, count_mat_fun, mc.cores = cores)
+  novel_models = NULL
+  count_mat_rds = file.path(dir, "isoform_count_mat.rds")
+  gtf_dir = file.path(dir, "gtf")
+  novel_models_rds = file.path(gtf_dir, "novel_transcript_models.rds")
+  gtf_by_gene = split_gtf_by_gene(
+    gtf,
+    gene_col = gtf_gene_col,
+    iso_col = gtf_iso_col,
+    start_col = gtf_start_col,
+    end_col = gtf_end_col
+  )
+  gene_info_by_gene = build_gene_info_index(
+    gene_bed,
+    gene_col = bed_gene_col,
+    chr_col = "chr",
+    strand_col = bed_strand_col
+  )
+  if (file.exists(count_mat_rds) && file.exists(novel_models_rds)) {
+    cat("Isoform matrix cache and novel transcript models already exist, skipping this step.\n")
+    count_mat = readRDS(count_mat_rds)
+    novel_models = readRDS(novel_models_rds)
   } else {
-    count_mat = lapply(data_split, count_mat_fun)
+    data_split = genes_distribute(umi_count, 16 * cores, gene_col)
+    count_mat_fun = function(x) {
+      if (is.null(x)) {
+        return(NULL)
+      }
+      data_by_gene = split(as.data.frame(x), as.character(x[[gene_col]]))
+      sub_result = cells_genes_isos_count(
+        x, gtf,
+        thresh = mid_offset_thresh,
+        overlap_thresh = overlap_thresh,
+        filter_only_intron = filter_only_intron,
+        gtf_gene_col = gtf_gene_col,
+        gtf_iso_col = gtf_iso_col,
+        gtf_start_col = gtf_start_col,
+        gtf_end_col = gtf_end_col,
+        split = split, sep = sep,
+        data_by_gene = data_by_gene,
+        gtf_by_gene = gtf_by_gene,
+        gene_info_by_gene = gene_info_by_gene,
+        return_novel_models = TRUE
+      )
+      if (is.null(sub_result$count) || nrow(sub_result$count) == 0) {
+        return(NULL)
+      }
+      sub_result
+    }
+
+    if (cores > 1) {
+      count_mat = parallel::mclapply(data_split, count_mat_fun, mc.cores = cores)
+    } else {
+      count_mat = lapply(data_split, count_mat_fun)
+    }
+    count_out = Filter(Negate(is.null), lapply(count_mat, `[[`, "count"))
+    novel_out = Filter(Negate(is.null), lapply(count_mat, `[[`, "novel_models"))
+    count_mat = as.data.frame(do.call(dplyr::bind_rows, count_out))
+    novel_models = if (length(novel_out) > 0) {
+      as.data.frame(do.call(dplyr::bind_rows, novel_out)) %>% dplyr::distinct()
+    } else {
+      NULL
+    }
+    saveIsoMat(count_mat, dir)
+    saveRDS(count_mat, count_mat_rds)
   }
-  count_mat = as.data.frame(do.call(dplyr::bind_rows, count_mat))
-  saveIsoMat(count_mat, dir)
 
   if (!is.null(gtf_source_path) && nzchar(gtf_source_path)) {
-    gtf_dir = file.path(dir, "gtf")
     dir.create(gtf_dir, showWarnings = FALSE, recursive = TRUE)
 
-    detected_genes = sort(unique(as.character(umi_count[[gene_col]])))
-    novel_models = collect_novel_transcript_models(
-      umi_count,
-      gtf = gtf,
-      gene_bed = gene_bed,
-      thresh = mid_offset_thresh,
-      overlap_thresh = overlap_thresh,
-      filter_only_intron = filter_only_intron,
-      gene_col = gene_col,
-      transcript_col = "isoform",
-      gtf_gene_col = gtf_gene_col,
-      gtf_iso_col = gtf_iso_col,
-      gtf_start_col = gtf_start_col,
-      gtf_end_col = gtf_end_col,
-      bed_gene_col = bed_gene_col,
-      bed_strand_col = bed_strand_col,
-      split = split,
-      sep = sep
-    )
-
-    write_detected_genes_gtf(
-      gtf_path = gtf_source_path,
-      genes = detected_genes,
-      novel_models = novel_models,
-      out_path = file.path(gtf_dir, "detected_genes.gtf"),
-      split = split,
-      sep = sep
-    )
+    if (!is.null(novel_models)) {
+      saveRDS(novel_models, novel_models_rds)
+    }
 
     write_augmented_gtf(
       gtf_path = gtf_source_path,
       novel_models = novel_models,
       out_path = file.path(gtf_dir, "augmented_with_novel.gtf"),
       split = split,
-      sep = sep
+      sep = sep,
+      cores = cores
+    )
+
+    expressed_transcripts = unique(as.character(count_mat$isoform))
+    expressed_genes = unique(as.character(count_mat$gene))
+    write_detected_transcripts_gtf(
+      gtf_path = file.path(gtf_dir, "augmented_with_novel.gtf"),
+      transcripts = expressed_transcripts,
+      genes = expressed_genes,
+      out_path = file.path(gtf_dir, "detected_genes.gtf"),
+      cores = cores
     )
   }
 
+  attr(count_mat, "novel_models") = novel_models
+  attr(count_mat, "structure_output") = novel_models
   invisible(count_mat)
 }

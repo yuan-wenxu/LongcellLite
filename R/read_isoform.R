@@ -133,7 +133,7 @@ extract_read_isoforms_from_bam = function(
 ) {
   out_path = file.path(work_dir, "read_isoform", "read_isoform.tsv")
   if (file.exists(out_path) && !overwrite) {
-    warning("The read-level isoform output already exists; reusing cached result.")
+    cat("Read-level isoform result already exists, skipping this step.\n")
     return(read.table(out_path, header = TRUE, sep = "\t"))
   }
 
