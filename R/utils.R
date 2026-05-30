@@ -45,7 +45,7 @@ long2square = function(long, row_names_from, col_names_from, values_from,
   as.matrix(mat)
 }
 
-save10X = function(long, path, i = "gene", j = "cell", value = "count") {
+save10X = function(long, path, i = "gene", j = "cell", value = "count", feature_extra = NULL) {
   dir.create(path, showWarnings = FALSE, recursive = TRUE)
   long = long[, c(i, j, value)]
   x = names(table(long[, i]))
@@ -59,8 +59,14 @@ save10X = function(long, path, i = "gene", j = "cell", value = "count") {
     x = long[, value]
   )
 
-  write.table(x, file = file.path(path, "features.tsv"), sep = "\t",
-              quote = FALSE, row.names = FALSE, col.names = FALSE)
+  if (!is.null(feature_extra)) {
+    feature_df = data.frame(x, feature_extra[x], stringsAsFactors = FALSE)
+    write.table(feature_df, file = file.path(path, "features.tsv"), sep = "\t",
+                quote = FALSE, row.names = FALSE, col.names = FALSE)
+  } else {
+    write.table(x, file = file.path(path, "features.tsv"), sep = "\t",
+                quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
   write.table(y, file = file.path(path, "barcodes.tsv"), sep = "\t",
               quote = FALSE, row.names = FALSE, col.names = FALSE)
   Matrix::writeMM(sparse_mat, file = file.path(path, "matrix.mtx"))
@@ -80,11 +86,13 @@ saveIsoMat = function(iso, path, cell_col = "cell", gene_col = "gene",
 
   gene_long = iso %>% dplyr::group_by(cell, gene) %>%
     dplyr::summarise(count = sum(count), .groups = "drop")
-  iso_long = iso %>% dplyr::filter(isoform != "unknown", count > 0) %>%
-    dplyr::select(-gene)
+  iso_long = iso %>% dplyr::filter(isoform != "unknown", count > 0)
+  iso_gene_map_df = unique(iso_long[, c("isoform", "gene")])
+  iso_gene_map = setNames(iso_gene_map_df$gene, iso_gene_map_df$isoform)
+  iso_long = iso_long %>% dplyr::select(-gene)
 
   save10X(gene_long, file.path(path, "gene"))
-  save10X(iso_long, file.path(path, "isoform"), i = "isoform")
+  save10X(iso_long, file.path(path, "isoform"), i = "isoform", feature_extra = iso_gene_map)
 }
 
 init_project = function(work_dir) {

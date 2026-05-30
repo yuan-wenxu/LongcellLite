@@ -692,10 +692,13 @@ UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col =
     chr_col = "chr",
     strand_col = bed_strand_col
   )
-  if (file.exists(count_mat_rds) && file.exists(novel_models_rds)) {
-    cat("Isoform matrix cache and novel transcript models already exist, skipping this step.\n")
+  if (file.exists(count_mat_rds)) {
+    cat("Isoform matrix cache already exists, rebuilding matrix files from cache.\n")
     count_mat = readRDS(count_mat_rds)
-    novel_models = readRDS(novel_models_rds)
+    if (file.exists(novel_models_rds)) {
+      novel_models = readRDS(novel_models_rds)
+    }
+    saveIsoMat(count_mat, dir)
   } else {
     data_split = genes_distribute(umi_count, 16 * cores, gene_col)
     count_mat_fun = function(x) {
@@ -725,8 +728,10 @@ UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col =
     }
 
     if (cores > 1) {
+      cat("Running isoform alignment in parallel using", cores, "cores...\n")
       count_mat = parallel::mclapply(data_split, count_mat_fun, mc.cores = cores)
     } else {
+      cat("Running isoform alignment in a single thread...\n")
       count_mat = lapply(data_split, count_mat_fun)
     }
     count_out = Filter(Negate(is.null), lapply(count_mat, `[[`, "count"))
@@ -739,6 +744,7 @@ UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col =
     }
     saveIsoMat(count_mat, dir)
     saveRDS(count_mat, count_mat_rds)
+    cat("Isoform alignment completed and count matrix saved.\n")
   }
 
   if (!is.null(gtf_source_path) && nzchar(gtf_source_path)) {
@@ -766,6 +772,7 @@ UMI_count_to_isoform = function(umi_count, dir, gene_bed, gtf = NULL, gene_col =
       out_path = file.path(gtf_dir, "detected_genes.gtf"),
       cores = cores
     )
+  cat("Augmented GTF with novel transcripts has been written to the output directory.\n")
   }
 
   attr(count_mat, "novel_models") = novel_models
